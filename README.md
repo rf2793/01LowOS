@@ -4,7 +4,7 @@ Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL
 
 - **Download do executável (Releases):** https://github.com/rf2793/01LowOS/releases
 - **Reportar problemas:** https://github.com/rf2793/01LowOS/issues
-- **Apoiar o projeto:** https://github.com/sponsors/rf2793
+- **Apoiar o projeto:** https://github.com/sponsors/rf2793 | **PIX:** `be040dc9-6c7c-48b6-af4a-6a0444a5eb45`
 
 ## Destaques
 

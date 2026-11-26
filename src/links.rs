@@ -8,7 +8,7 @@ use crate::sys::elevation::to_wide_null;
 pub const GITHUB_REPO_URL: &str = "https://github.com/rf2793/01LowOS";
 pub const GITHUB_ISSUES_NEW_URL: &str = "https://github.com/rf2793/01LowOS/issues/new";
 pub const GITHUB_SPONSORS_URL: &str = "https://github.com/sponsors/rf2793";
-pub const DONATE_PIX_KEY: &str = "";
+pub const DONATE_PIX_KEY: &str = "be040dc9-6c7c-48b6-af4a-6a0444a5eb45";
 
 pub fn open_url(url: &str) -> Result<(), String> {
     let verb = to_wide_null("open");
