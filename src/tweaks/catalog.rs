@@ -904,18 +904,17 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(ServiceGroupTweak::new(
         TweakMeta {
             id: "svc.smb_network_off",
-            name: "Serviços de Rede: SMB (LanmanWorkstation/Server) e WinHttpAutoProxy",
+            name: "Serviços de Rede: SMB (LanmanWorkstation e LanmanServer)",
             category: Category::WindowsServices,
             risk: RiskLevel::Medium,
             requires_reboot: true,
             requires_admin: true,
-            description: "Desativa cliente/servidor SMB de pastas compartilhadas na rede e proxy automático WinHTTP. iphlpsvc e Wcmsvc são preservados para manter ExitLag, NoPing, GearUP e VPNs funcionando. Atenção: compartilhamento de arquivos/impressoras na rede local deixa de funcionar até reverter.",
+            description: "Desativa cliente/servidor SMB de pastas compartilhadas na rede local. iphlpsvc, Wcmsvc e WinHttpAutoProxySvc são preservados para manter ExitLag, NoPing, GearUP e VPNs funcionando. Atenção: compartilhamento de arquivos/impressoras na rede local deixa de funcionar até reverter.",
             details: vec![],
         },
         vec![
             ServiceTarget::disable_default_auto("LanmanWorkstation"),
             ServiceTarget::disable_default_auto("LanmanServer"),
-            ServiceTarget::disable("WinHttpAutoProxySvc"),
         ],
     )));
 
@@ -1336,6 +1335,7 @@ mod tests {
                 assert!(!low.contains("iphlpsvc: disabled"), "iphlpsvc deve ficar mantido para ExitLag/VPN! {}", meta.id);
                 assert!(!low.contains("wcmsvc: disabled"), "Wcmsvc deve ficar mantido para ExitLag/VPN! {}", meta.id);
                 assert!(!low.contains("ndisvirtualbus"), "NdisVirtualBus deve ficar mantido para ExitLag/VPN! {}", meta.id);
+                assert!(!low.contains("winhttpautoproxysvc: disabled"), "WinHttpAutoProxySvc é dependência de iphlpsvc/Wcmsvc! {}", meta.id);
             }
         }
 
