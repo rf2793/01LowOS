@@ -932,16 +932,15 @@ impl PnpUnusedDevicesTweak {
         Self {
             meta: TweakMeta {
                 id: "bloat.pnp_unused",
-                name: "Desativar dispositivos PnP sem uso (SATA vazio, Áudio HDMI AMD, NdisVirtualBus)",
+                name: "Desativar dispositivos PnP sem uso (SATA vazio e Áudio HDMI AMD)",
                 category: Category::PrivacyBloat,
                 risk: RiskLevel::Medium,
                 requires_reboot: false,
                 requires_admin: true,
-                description: "Desativa controladoras SATA sem nenhum disco conectado, áudio HDMI/DP AMD e NdisVirtualBus vazio, reduzindo dispositivos ociosos no barramento. Atenção: se usar som via cabo HDMI/DP de GPU AMD no monitor, o áudio por HDMI/DP para.",
+                description: "Desativa controladoras SATA sem nenhum disco conectado e áudio HDMI/DP AMD, reduzindo dispositivos ociosos no barramento. O NdisVirtualBus é preservado para manter ExitLag, NoPing e VPNs funcionando. Atenção: se usar som via cabo HDMI/DP de GPU AMD no monitor, o áudio por HDMI/DP para.",
                 details: vec![
                     "Controladoras SATA sem filhos conectados".into(),
                     "AMD High Definition Audio Device (HDMI/DP)".into(),
-                    "Enumerador NdisVirtualBus sem filhos".into(),
                 ],
             },
         }
@@ -953,8 +952,6 @@ $disp = @()
 $disp += @(Get-PnpDevice -PresentOnly -Class SCSIAdapter,HDC -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match 'SATA' -and $_.Status -eq 'OK' } |
     Where-Object { -not @((Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName DEVPKEY_Device_Children -ErrorAction SilentlyContinue).Data | Where-Object { $_ }).Count })
 $disp += @(Get-PnpDevice -PresentOnly -Class MEDIA -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq 'AMD High Definition Audio Device' -and $_.Status -eq 'OK' })
-$disp += @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.Service -eq 'NdisVirtualBus' -and $_.Status -eq 'OK' } |
-    Where-Object { -not @((Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName DEVPKEY_Device_Children -ErrorAction SilentlyContinue).Data | Where-Object { $_ }).Count })
 $rows = foreach ($d in $disp) { [pscustomobject]@{ name = $d.FriendlyName; instance_id = $d.InstanceId } }
 if ($rows) { ConvertTo-Json -InputObject @($rows) -Compress } else { '[]' }
 "#;

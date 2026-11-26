@@ -904,19 +904,17 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(ServiceGroupTweak::new(
         TweakMeta {
             id: "svc.smb_network_off",
-            name: "Serviços de Rede: SMB (LanmanWorkstation/Server), iphlpsvc, Wcmsvc e WinHttpAutoProxy",
+            name: "Serviços de Rede: SMB (LanmanWorkstation/Server) e WinHttpAutoProxy",
             category: Category::WindowsServices,
             risk: RiskLevel::Medium,
             requires_reboot: true,
             requires_admin: true,
-            description: "Desativa cliente/servidor SMB de pastas compartilhadas na rede, IP Helper e proxy automático WinHTTP. Atenção: compartilhamento de arquivos/impressoras na rede local deixa de funcionar até reverter.",
+            description: "Desativa cliente/servidor SMB de pastas compartilhadas na rede e proxy automático WinHTTP. iphlpsvc e Wcmsvc são preservados para manter ExitLag, NoPing, GearUP e VPNs funcionando. Atenção: compartilhamento de arquivos/impressoras na rede local deixa de funcionar até reverter.",
             details: vec![],
         },
         vec![
             ServiceTarget::disable_default_auto("LanmanWorkstation"),
             ServiceTarget::disable_default_auto("LanmanServer"),
-            ServiceTarget::disable_default_auto("iphlpsvc"),
-            ServiceTarget::disable_default_auto("Wcmsvc"),
             ServiceTarget::disable("WinHttpAutoProxySvc"),
         ],
     )));
@@ -1335,6 +1333,9 @@ mod tests {
                 assert!(!low.contains("usermanager: disabled"), "UserManager deve ficar mantido! {}", meta.id);
                 assert!(!low.contains("profsvc: disabled"), "ProfSvc deve ficar mantido! {}", meta.id);
                 assert!(!low.contains("cldflt: disabled"), "CldFlt quebra arquivos/atalhos do OneDrive! {}", meta.id);
+                assert!(!low.contains("iphlpsvc: disabled"), "iphlpsvc deve ficar mantido para ExitLag/VPN! {}", meta.id);
+                assert!(!low.contains("wcmsvc: disabled"), "Wcmsvc deve ficar mantido para ExitLag/VPN! {}", meta.id);
+                assert!(!low.contains("ndisvirtualbus"), "NdisVirtualBus deve ficar mantido para ExitLag/VPN! {}", meta.id);
             }
         }
 
