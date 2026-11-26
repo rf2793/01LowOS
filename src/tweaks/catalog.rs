@@ -749,12 +749,12 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(RegistryTweak::new(
         TweakMeta {
             id: "bloat.telemetry_restore_wer",
-            name: "Políticas: Desativar System Restore, WER, Localização, OneDrive, Sync, Ink, Hello e Shell órfãos",
+            name: "Políticas: Desativar System Restore, WER, Localização, OneDrive, Sync, Ink e Shell órfãos",
             category: Category::PrivacyBloat,
             risk: RiskLevel::Medium,
             requires_reboot: false,
             requires_admin: true,
-            description: "Desativa snapshots VSS do System Restore, Relatório de Erros, Histórico de Atividades, Anúncios, Localização, Sync, OneDrive, Biometria/Hello, Assistência Remota e bloqueia extensões órfãs do clique direito.",
+            description: "Desativa snapshots VSS do System Restore, Relatório de Erros, Histórico de Atividades, Anúncios, Localização, Sync, OneDrive, Assistência Remota e bloqueia extensões órfãs do clique direito (preserva Conta Microsoft e Windows Hello/PIN).",
             details: vec![],
         },
         vec![
@@ -773,14 +773,11 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors", "DisableLocation", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors", "DisableLocationScripting", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors", "DisableWindowsLocationProvider", dw(1)),
-            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "NoConnectedUser", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\SettingSync", "DisableSettingSync", dw(2)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\SettingSync", "DisableSettingSyncUserOverride", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\OneDrive", "DisableFileSyncNGSC", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\WindowsInkWorkspace", "AllowWindowsInkWorkspace", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\InputPersonalization", "AllowInputPersonalization", dw(0)),
-            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Biometrics", "Enabled", dw(0)),
-            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\PassportForWork", "Enabled", dw(0)),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{596AB062-B4D2-4215-9F74-E9109B0A8153}", sz("")),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{7AD84985-87B4-4a16-BE58-8B72A5B390F7}", sz("")),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{f81e9010-6ea4-11ce-a7ff-00aa003ca9f6}", sz("")),
@@ -1015,7 +1012,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     let misc_disable = [
         "AarSvc", "AJRouter", "ALG", "AppIDSvc", "AppMgmt", "AppVClient", "AssignedAccessManagerSvc",
         "autotimesvc", "AxInstSV", "BDESVC", "BTAGService", "BthAvctpSvc", "CDPSvc", "CDPUserSvc",
-        "CertPropSvc", "CloudBackupRestoreSvc", "cloudidsvc", "CscService", "DisplayEnhancementService",
+        "CertPropSvc", "CloudBackupRestoreSvc", "CscService", "DisplayEnhancementService",
         "DmEnrollmentSvc", "dot3svc", "DsSvc", "EapHost", "EFS", "embeddedmode", "EntAppSvc",
         "fdPHost", "FDResPub", "fhsvc", "FrameServer", "FrameServerMonitor", "GraphicsPerfSvc",
         "HvHost", "icssvc", "InventorySvc", "IpxlatCfgSvc", "KtmRm", "lfsvc", "lltdsvc", "lmhosts",
@@ -1028,15 +1025,14 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         "TieringEngineService", "TrkWks", "tzautoupdate", "UevAgentService", "UmRdpService",
         "UnistoreSvc", "upnphost", "UserDataSvc", "vmicguestinterface", "vmicheartbeat", "vmickvpexchange",
         "vmicrdv", "vmicshutdown", "vmictimesync", "vmicvmsession", "vmicvss", "WalletService",
-        "WbioSrvc", "WebClient", "Wecsvc", "WEPHOSTSVC", "WinRM", "wisvc",
+        "WebClient", "Wecsvc", "WEPHOSTSVC", "WinRM", "wisvc",
         "wmiApSrv", "WMPNetworkSvc", "workfolderssvc", "WpcMonSvc", "OneSyncSvc", "PolicyAgent", "QWAVE",
         // Pos-OOBE extras (sem PrintDeviceConfigurationService que pertence a svc.search_print_fax)
         "WSAIFabricSvc", "McpManagementService", "ADPSvc", "wuqisvc",
         "McmSvc", "WwanSvc", "MessagingService", "hpatchmon", "refsdedupsvc", "ZTHELPER", "P9RdrService",
-        "PenService", "IsolationSession", "IsoSessionCore", "ApxSvc", "midisrv", "TokenBroker",
-        "NgcSvc", "NgcCtnrSvc", "WPDBusEnum", "NcbService", "WManSvc",
+        "PenService", "IsolationSession", "IsoSessionCore", "ApxSvc", "midisrv",
+        "WPDBusEnum", "NcbService", "WManSvc",
         "IKEEXT", "MSDTC", "wbengine", "PerfHost", "VSS", "swprv", "XboxGipSvc", "RasMan",
-        "CredentialEnrollmentManagerUserSvc",
     ];
     let mut misc_targets: Vec<ServiceTarget> = misc_disable
         .iter()
@@ -1046,12 +1042,12 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(ServiceGroupTweak::new(
         TweakMeta {
             id: "svc.misc_non_essential",
-            name: "Serviços secundários sem uso para jogos (Fax/RDP/Hyper-V guest/Hello/XboxGip/etc.)",
+            name: "Serviços secundários sem uso para jogos (Fax/RDP/Hyper-V guest/XboxGip/etc.)",
             category: Category::WindowsServices,
             risk: RiskLevel::Medium,
             requires_reboot: true,
             requires_admin: true,
-            description: "Desativa serviços secundários de servidor, RDP, cartões inteligentes, celular, Windows Hello, backup e áudio MIDI, e ajusta AppXSvc para Manual. Preserva Wi-Fi, Bluetooth, áudio, notificações e loja.",
+            description: "Desativa serviços secundários de servidor, RDP, cartões inteligentes, celular, backup e áudio MIDI, e ajusta AppXSvc para Manual. Preserva Conta Microsoft, Windows Hello/PIN, Wi-Fi, Bluetooth, áudio, notificações e loja.",
             details: vec![],
         },
         misc_targets,
@@ -1329,6 +1325,17 @@ mod tests {
                 assert!(!low.contains("sensorservice: disabled"), "SensorService deve ficar mantido! {}", meta.id);
                 assert!(!low.contains("licensemanager: disabled"), "LicenseManager deve ficar mantido! {}", meta.id);
                 assert!(!low.contains("installservice: disabled"), "InstallService deve ficar mantido! {}", meta.id);
+                assert!(!low.contains("noconnecteduser"), "NoConnectedUser quebra Conta Microsoft! {}", meta.id);
+                assert!(!low.contains("passportforwork"), "PassportForWork quebra PIN/Hello! {}", meta.id);
+                assert!(!low.contains("tokenbroker: disabled"), "TokenBroker deve ficar mantido! {}", meta.id);
+                assert!(!low.contains("wlidsvc: disabled"), "wlidsvc deve ficar mantido! {}", meta.id);
+                assert!(!low.contains("ngcsvc: disabled"), "NgcSvc deve ficar mantido! {}", meta.id);
+                assert!(!low.contains("ngcctnrsvc: disabled"), "NgcCtnrSvc deve ficar mantido! {}", meta.id);
+                assert!(!low.contains("wbiosrvc: disabled"), "WbioSrvc deve ficar mantido! {}", meta.id);
+                assert!(!low.contains("credentialenrollmentmanagerusersvc: disabled"), "CredentialEnrollmentManagerUserSvc deve ficar mantido! {}", meta.id);
+                assert!(!low.contains("cloudidsvc: disabled"), "cloudidsvc deve ficar mantido! {}", meta.id);
+                assert!(!low.contains("usermanager: disabled"), "UserManager deve ficar mantido! {}", meta.id);
+                assert!(!low.contains("profsvc: disabled"), "ProfSvc deve ficar mantido! {}", meta.id);
             }
         }
 
