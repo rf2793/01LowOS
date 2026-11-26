@@ -749,12 +749,12 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(RegistryTweak::new(
         TweakMeta {
             id: "bloat.telemetry_restore_wer",
-            name: "Políticas: Desativar System Restore, WER, Localização, OneDrive, Sync, Ink e Shell órfãos",
+            name: "Políticas: Desativar System Restore, WER, Localização, Sync, Ink e Shell órfãos",
             category: Category::PrivacyBloat,
             risk: RiskLevel::Medium,
             requires_reboot: false,
             requires_admin: true,
-            description: "Desativa snapshots VSS do System Restore, Relatório de Erros, Histórico de Atividades, Anúncios, Localização, Sync, OneDrive, Assistência Remota e bloqueia extensões órfãs do clique direito (preserva Conta Microsoft e Windows Hello/PIN).",
+            description: "Desativa snapshots VSS do System Restore, Relatório de Erros, Histórico de Atividades, Anúncios, Localização, Sync, Assistência Remota e bloqueia extensões órfãs do clique direito (preserva Conta Microsoft, Windows Hello/PIN e OneDrive/Arquivos na Nuvem).",
             details: vec![],
         },
         vec![
@@ -775,7 +775,6 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors", "DisableWindowsLocationProvider", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\SettingSync", "DisableSettingSync", dw(2)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\SettingSync", "DisableSettingSyncUserOverride", dw(1)),
-            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\OneDrive", "DisableFileSyncNGSC", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\WindowsInkWorkspace", "AllowWindowsInkWorkspace", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\InputPersonalization", "AllowInputPersonalization", dw(0)),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{596AB062-B4D2-4215-9F74-E9109B0A8153}", sz("")),
@@ -987,7 +986,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             risk: RiskLevel::Medium,
             requires_reboot: true,
             requires_admin: true,
-            description: "Define Start=4 em drivers sem uso (wtd, kdnic, rdpbus, CSC, Dfsc, NetBT, NetBIOS, Beep, CldFlt, rdbss, lltdio, rspndr, MsLldp). Preserva filtros NDIS e mantém Vid/storqosflt se Hyper-V estiver instalado.",
+            description: "Define Start=4 em drivers sem uso (wtd, kdnic, rdpbus, CSC, Dfsc, NetBT, NetBIOS, Beep, rdbss, lltdio, rspndr, MsLldp). Preserva filtros NDIS, CldFlt (OneDrive/Arquivos na Nuvem) e mantém Vid/storqosflt se Hyper-V estiver instalado.",
             details: vec![],
         },
         vec![
@@ -999,7 +998,6 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             ServiceTarget::disable("NetBT"),
             ServiceTarget::disable("NetBIOS"),
             ServiceTarget::disable("Beep"),
-            ServiceTarget::disable("CldFlt"),
             ServiceTarget::disable("rdbss"),
             ServiceTarget::disable("lltdio"),
             ServiceTarget::disable("rspndr"),
@@ -1336,6 +1334,7 @@ mod tests {
                 assert!(!low.contains("cloudidsvc: disabled"), "cloudidsvc deve ficar mantido! {}", meta.id);
                 assert!(!low.contains("usermanager: disabled"), "UserManager deve ficar mantido! {}", meta.id);
                 assert!(!low.contains("profsvc: disabled"), "ProfSvc deve ficar mantido! {}", meta.id);
+                assert!(!low.contains("cldflt: disabled"), "CldFlt quebra arquivos/atalhos do OneDrive! {}", meta.id);
             }
         }
 
