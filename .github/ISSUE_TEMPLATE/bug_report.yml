@@ -1,0 +1,27 @@
+name: Reportar Problema (Bug)
+description: Relate um erro, travamento ou comportamento inesperado no 01LowOS
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Descrição do problema
+      description: O que aconteceu e qual aba/otimização você estava usando?
+      placeholder: Ex. Ao aplicar [id], ocorreu erro...
+    validations:
+      required: true
+  - type: input
+    id: windows_version
+    attributes:
+      label: Versão do Windows 11
+      placeholder: "Ex.: Windows 11 24H2 / 25H2 Pro ou LTSC"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Saída do --self-test (se houver)
+      render: text
+    validations:
+      required: false

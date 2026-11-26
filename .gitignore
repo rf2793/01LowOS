@@ -1,0 +1,7 @@
+/target/
+/dist/
+/.cargo/config.toml
+*.pdb
+*.log
+self_test_report.txt
+relatorio_sistema.txt
