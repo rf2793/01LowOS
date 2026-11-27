@@ -5,10 +5,10 @@ use crate::tweaks::advanced::{
     ActionCenterSsoTweak, AmdShaderCacheTweak, AmdUlpsOffTweak, AudioEnhancementsTweak,
     BcdCleanTimersTweak, CloudflareDnsTweak, ConsumerAppxTweak, DefenderGameExclusionsTweak,
     EdgeBackgroundTweak, EtwAutologgerTweak, FirewallOrphansTweak, GpuNicMsiModeTweak,
-    LegacyHardwareIrqTweak, MemoryCompressionTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak,
-    NvidiaHdcpOffTweak, NvidiaTelemetryTweak, NvmeStorageMsiTweak, OptionalFeaturesTweak,
-    PnpUnusedDevicesTweak, PresentMonFpsTweak, SmartScreenAclTweak, SystemAppxTweak,
-    TcpNagleTweak, ThirdPartyBloatTweak, UsbAudioMsiModeTweak, UsbD3SuspendTweak,
+    LegacyHardwareIrqTweak, MemoryCompressionTweak, MmAgentPrelaunchTweak, NicPowerMgmtTweak,
+    NvidiaDynamicPstateTweak, NvidiaHdcpOffTweak, NvidiaTelemetryTweak, NvmeStorageMsiTweak,
+    OptionalFeaturesTweak, PnpUnusedDevicesTweak, PresentMonFpsTweak, SmartScreenAclTweak,
+    SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak, UsbAudioMsiModeTweak, UsbD3SuspendTweak,
     UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
 };
 use crate::tweaks::network::{
@@ -29,7 +29,7 @@ fn sz(v: &str) -> RegValue {
 }
 
 pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
-    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(96);
+    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(100);
 
     // 1. GPU & LATÊNCIA
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -234,6 +234,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     )));
 
     list.push(Box::new(MemoryCompressionTweak::new()));
+    list.push(Box::new(MmAgentPrelaunchTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
@@ -350,21 +351,23 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "sys.ntfs_low_overhead",
-            name: "NTFS: Desativar LastAccessUpdate e nomes curtos 8.3 (mantém TRIM)",
+            name: "NTFS: Desativar LastAccessUpdate, nomes 8.3 e criptografia de PageFile (mantém TRIM)",
             category: Category::SystemKernel,
             risk: RiskLevel::Low,
             requires_reboot: true,
             requires_admin: true,
-            description: "Evita gravações de metadata a cada leitura de arquivos/texturas nos jogos (equivalente a fsutil disablelastaccess 1 / 0x80000001 e disable8dot3 1) sem desativar TRIM.",
+            description: "Evita gravações de metadata a cada leitura de arquivos/texturas nos jogos (fsutil disablelastaccess 1 / 0x80000001, disable8dot3 1 e NtfsEncryptPagingFile=0) sem desativar TRIM.",
             details: vec![],
         },
         vec![
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsDisableLastAccessUpdate", dw(0x8000_0001)),
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsDisable8dot3NameCreation", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsEncryptPagingFile", dw(0)),
         ],
         vec![
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsDisableLastAccessUpdate", dw(0x8000_0002)),
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsDisable8dot3NameCreation", dw(2)),
+            RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsEncryptPagingFile"),
         ],
     )));
 
@@ -480,6 +483,30 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
 
     // 3. ENERGIA
     list.push(Box::new(PowerPlanTweak::new()));
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "power.overlay_best_perf",
+            name: "Energia Win11: Modo de Energia em 'Melhor desempenho' na tomada",
+            category: Category::Power,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Define ActiveOverlayAcPowerScheme para o GUID oficial 'Best Performance' (ded574b5-45a0-4f42-8737-46345c09c238) nas Configurações modernas do Windows 11, evitando redução de boost da CPU em cargas médias.",
+            details: vec![],
+        },
+        vec![RegOp::set(
+            RegHive::Hklm,
+            r"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes",
+            "ActiveOverlayAcPowerScheme",
+            sz("ded574b5-45a0-4f42-8737-46345c09c238"),
+        )],
+        vec![RegOp::set(
+            RegHive::Hklm,
+            r"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes",
+            "ActiveOverlayAcPowerScheme",
+            sz("00000000-0000-0000-0000-000000000000"),
+        )],
+    )));
     list.push(Box::new(HiberfilOffTweak::new()));
     list.push(Box::new(DeviceWakeTweak::new()));
     list.push(Box::new(UsbDevicePowerMgmtTweak::new()));
@@ -502,18 +529,19 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "net.llmnr_mdns_wpad_off",
-            name: "Rede: Desativar LLMNR, mDNS, WPAD WinHTTP e túneis IPv6 (6to4/ISATAP/Teredo)",
+            name: "Rede: Desativar LLMNR, mDNS, WPAD WinHTTP, Negative DNS Cache e túneis IPv6",
             category: Category::Network,
             risk: RiskLevel::Low,
             requires_reboot: true,
             requires_admin: true,
-            description: "Desativa protocolos de descoberta multicast/anúncio local e túneis IPv6 de transição sem utilidade para jogos.",
+            description: "Desativa protocolos de descoberta multicast/anúncio local, túneis IPv6 de transição e zera MaxNegativeCacheTtl (evita cache de falhas DNS em reconexões/matchmaking).",
             details: vec![],
         },
         vec![
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows NT\DNSClient", "EnableMulticast", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WinHttp", "DisableWpad", dw(1)),
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters", "EnableMDNS", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters", "MaxNegativeCacheTtl", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\TCPIP\v6Transition", "6to4_State", sz("Disabled")),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\TCPIP\v6Transition", "ISATAP_State", sz("Disabled")),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\TCPIP\v6Transition", "Teredo_State", sz("Disabled")),
@@ -522,6 +550,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows NT\DNSClient", "EnableMulticast"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WinHttp", "DisableWpad"),
             RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters", "EnableMDNS"),
+            RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters", "MaxNegativeCacheTtl"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\TCPIP\v6Transition", "6to4_State"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\TCPIP\v6Transition", "ISATAP_State"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\TCPIP\v6Transition", "Teredo_State"),
@@ -922,6 +951,66 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     )));
 
     list.push(Box::new(EdgeBackgroundTweak::new()));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "bloat.browsers_bg_telemetry_off",
+            name: "Navegadores (Chrome, Brave, Edge): Desativar fundo após fechar e telemetria",
+            category: Category::PrivacyBloat,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Impede Chrome e Brave de continuarem rodando na bandeja após fechar (BackgroundModeEnabled=0) e desativa telemetria/promoções/coleções de Chrome, Brave e Edge por política oficial.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Google\Chrome", "BackgroundModeEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Google\Chrome", "MetricsReportingEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Google\Chrome", "PromotionsEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\BraveSoftware\Brave", "BackgroundModeEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\BraveSoftware\Brave", "MetricsReportingEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "MetricsReportingEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "DiagnosticData", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "EdgeCollectionsEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "ShowRecommendationsEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "PersonalizationReportingEnabled", dw(0)),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Google\Chrome", "BackgroundModeEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Google\Chrome", "MetricsReportingEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Google\Chrome", "PromotionsEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\BraveSoftware\Brave", "BackgroundModeEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\BraveSoftware\Brave", "MetricsReportingEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "MetricsReportingEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "DiagnosticData"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "EdgeCollectionsEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "ShowRecommendationsEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "PersonalizationReportingEnabled"),
+        ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "bloat.autorun_off",
+            name: "Segurança & Foco: Desativar AutoRun e AutoPlay em todas as unidades",
+            category: Category::PrivacyBloat,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Define NoDriveTypeAutoRun=255 (HKLM/HKCU) e DisableAutoplay=1, evitando popups de reprodução automática e roubo de foco ao conectar pendrives ou periféricos USB durante jogos.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDriveTypeAutoRun", dw(255)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDriveTypeAutoRun", dw(255)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\AutoplayHandlers", "DisableAutoplay", dw(1)),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDriveTypeAutoRun"),
+            RegOp::delete(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDriveTypeAutoRun"),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\AutoplayHandlers", "DisableAutoplay", dw(0)),
+        ],
+    )));
 
     list.push(Box::new(RegistryTweak::new(
         TweakMeta {
@@ -1467,6 +1556,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "sys.nvme_storage_msi",
     "sys.fast_startup_off",
     "sys.memory_compression_off",
+    "sys.mmagent_prelaunch_off",
     "sys.vbs_hvci_off",
     "sys.fth_off",
     "sys.crash_rsop_clean",
@@ -1478,6 +1568,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "sys.defender_game_exclusions",
     "sys.ifeo_touch_voice_off",
     "power.plan_01lowos",
+    "power.overlay_best_perf",
     "power.hiberfil_off",
     "power.device_wake_off",
     "power.usb_device_pm_off",
@@ -1499,6 +1590,8 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "bloat.ai_search_cloud",
     "bloat.appcompat_sqm_telemetry",
     "bloat.edge_background_off",
+    "bloat.browsers_bg_telemetry_off",
+    "bloat.autorun_off",
     "bloat.maintenance_background_off",
     "bloat.actioncenter_sso",
     "tasks.windows_bloat",
@@ -1523,7 +1616,7 @@ mod tests {
     #[test]
     fn catalog_ids_are_unique_and_non_empty() {
         let cat = build_catalog();
-        assert!(cat.len() >= 91);
+        assert!(cat.len() >= 95);
         validate_catalog(&cat).unwrap();
     }
 
@@ -1574,6 +1667,10 @@ mod tests {
                 assert!(!low.contains("stuttermode"), "Placebo proibido em {}", meta.id);
                 assert!(!low.contains("kmd_enableinternallargepage"), "Placebo proibido em {}", meta.id);
                 assert!(!low.contains("rmgpspsenablepercpucoredpc"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("ecncapability"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("nonsackrttresiliency"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("mousedataqueuesize"), "Tweak instavel proibido em {}", meta.id);
+                assert!(!low.contains("keyboarddataqueuesize"), "Tweak instavel proibido em {}", meta.id);
                 if !low.starts_with("remover ") {
                     assert!(!low.contains("iopagelocklimit"), "Placebo proibido em {}", meta.id);
                     assert!(!low.contains("globaltimerresolutionrequests"), "Timer global proibido em {}", meta.id);

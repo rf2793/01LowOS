@@ -1313,19 +1313,25 @@ $tasksAll = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
 })
 $tasksPending = @($tasksAll | Where-Object { $_.State -ne 'Disabled' }).Count
 $drvPending = 0
+$drvTotal = 0
 foreach ($n in 'AMDRyzenMasterDriverV29','AMDRyzenMasterDriverV32') {
     $st = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$n" -Name Start -ErrorAction SilentlyContinue).Start
-    if ($null -ne $st -and $st -lt 4) { $drvPending++ }
+    if ($null -ne $st) {
+        $drvTotal++
+        if ($st -lt 4) { $drvPending++ }
+    }
 }
 $amdKey = 'HKLM:\SOFTWARE\AMD\AMDInstallManager\AutoUpdate'
-$amdPending = @(Get-ItemProperty -LiteralPath $amdKey -Name DisableAutoUpdates -ErrorAction SilentlyContinue | Where-Object { $_.DisableAutoUpdates -ne 1 }).Count
+$amdVal = (Get-ItemProperty -LiteralPath $amdKey -Name DisableAutoUpdates -ErrorAction SilentlyContinue).DisableAutoUpdates
+$amdTotal = if ($null -ne $amdVal) { 1 } else { 0 }
+$amdPending = if ($null -ne $amdVal -and $amdVal -ne 1) { 1 } else { 0 }
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $apKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
 $runReg = Get-Item -LiteralPath $runKey -ErrorAction SilentlyContinue
 $apAtual = Get-ItemProperty -LiteralPath $apKey -ErrorAction SilentlyContinue
 $runItems = @(if ($runReg) { $runReg.GetValueNames() | Where-Object { $_ -in @('RazerAppEngine','AMDNoiseSuppression') -or $_ -like 'GoogleUpdaterTaskUser*' } } else { @() })
 $runPending = @($runItems | Where-Object { -not ($apAtual -and $null -ne $apAtual.$_ -and ([int]@($apAtual.$_)[0] -band 1)) }).Count
-$total = $svcAll.Count + $tasksAll.Count + $runItems.Count
+$total = $svcAll.Count + $tasksAll.Count + $runItems.Count + $drvTotal + $amdTotal
 $pend = $svcPending + $tasksPending + $drvPending + $amdPending + $runPending
 Write-Output "$pend/$total"
 "#;
@@ -2057,7 +2063,7 @@ $snap | ConvertTo-Json -Depth 3 -Compress
         let out = run_powershell_checked(query_script)?;
         let val: serde_json::Value =
             serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
-        let _created = backups.save_if_absent(self.meta.id, val.clone())?;
+        let created = backups.save_if_absent(self.meta.id, val.clone())?;
 
         let escaped = serde_json::to_string(&val)
             .map_err(|e| e.to_string())?
@@ -2082,7 +2088,12 @@ if ($snap.has_nv) {{
 }}
 "#
         );
-        run_powershell_checked(&apply_script)?;
+        if let Err(e) = run_powershell_checked(&apply_script) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
         Ok("Telemetria NVIDIA desativada.".into())
     }
 
@@ -3121,7 +3132,7 @@ if ($rows) { ConvertTo-Json -InputObject @($rows) -Depth 3 -Compress } else { '[
             return Ok("Nenhum adaptador físico conectado para configurar DNS.".into());
         }
         let json = serde_json::to_value(&rows).map_err(|e| e.to_string())?;
-        let _created = backups.save_if_absent(self.meta.id, json)?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
 
         let escaped = serde_json::to_string(&rows)
             .map_err(|e| e.to_string())?
@@ -3143,7 +3154,12 @@ foreach ($ip in @('1.1.1.1','1.0.0.1')) {{
 }}
 "#
         );
-        run_powershell_checked(&apply_script)?;
+        if let Err(e) = run_powershell_checked(&apply_script) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
         Ok(format!(
             "DNS Cloudflare (1.1.1.1 / 1.0.0.1 + DoH) aplicado em {} adaptador(es).",
             rows.len()
@@ -4305,5 +4321,116 @@ impl Tweak for NvmeStorageMsiTweak {
         }
         backups.remove(self.meta.id)?;
         Ok(format!("MSI Mode NVMe/AHCI restaurado em {} item(ns).", snap.len()))
+    }
+}
+
+pub struct MmAgentPrelaunchTweak {
+    meta: TweakMeta,
+}
+
+impl MmAgentPrelaunchTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "sys.mmagent_prelaunch_off",
+                name: "Sistema: Desativar ApplicationPreLaunch e PageCombining (MMAgent)",
+                category: Category::SystemKernel,
+                risk: RiskLevel::Low,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Desativa ApplicationPreLaunch e PageCombining no MMAgent (Disable-MMAgent), impedindo o Windows de pré-abrir apps em segundo plano (que acordam a GPU dedicada e geram picos de frametime) e mantendo MemoryCompression intacta para quem tem 8–16 GB de RAM.",
+                details: vec![
+                    "Get-MMAgent / Disable-MMAgent -ApplicationPreLaunch -PageCombining".into(),
+                    "Reversão: restaura cada flag ao estado original salvo no backup".into(),
+                ],
+            },
+        }
+    }
+
+    fn query_flags() -> Result<(bool, bool), String> {
+        let out = run_powershell_checked(
+            "$m = Get-MMAgent -ErrorAction Stop; Write-Output \"$([bool]$m.ApplicationPreLaunch),$([bool]$m.PageCombining)\"",
+        )?;
+        let s = out.stdout.trim();
+        let (a, b) = s
+            .split_once(',')
+            .ok_or_else(|| format!("Saída inesperada de Get-MMAgent: {s}"))?;
+        Ok((
+            a.eq_ignore_ascii_case("True"),
+            b.eq_ignore_ascii_case("True"),
+        ))
+    }
+}
+
+impl Tweak for MmAgentPrelaunchTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        if !crate::sys::elevation::is_elevated() {
+            return TweakStatus::NotApplicable("Requer Admin para verificar".into());
+        }
+        match Self::query_flags() {
+            Ok((false, false)) => TweakStatus::Applied,
+            Ok((true, true)) => TweakStatus::NotApplied,
+            Ok(_) => TweakStatus::Partial("1/2 flags desativadas".into()),
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let (prelaunch, page_combining) = Self::query_flags()?;
+        let json = serde_json::json!({
+            "application_prelaunch": prelaunch,
+            "page_combining": page_combining,
+        });
+        let created = backups.save_if_absent(self.meta.id, json)?;
+        if !prelaunch && !page_combining {
+            return Ok("ApplicationPreLaunch e PageCombining já estavam desativados.".into());
+        }
+        if let Err(e) = run_powershell_checked(
+            "Start-Service SysMain -ErrorAction SilentlyContinue; Disable-MMAgent -ApplicationPreLaunch -PageCombining -ErrorAction Stop",
+        ) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
+        Ok("ApplicationPreLaunch e PageCombining desativados via MMAgent.".into())
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup encontrado para MMAgent PreLaunch.".into());
+        };
+        let prelaunch = rec.data["application_prelaunch"].as_bool().unwrap_or(true);
+        let page_combining = rec.data["page_combining"].as_bool().unwrap_or(false);
+        let pre_cmd = if prelaunch {
+            "Enable-MMAgent -ApplicationPreLaunch -ErrorAction Stop"
+        } else {
+            "Disable-MMAgent -ApplicationPreLaunch -ErrorAction Stop"
+        };
+        let pc_cmd = if page_combining {
+            "Enable-MMAgent -PageCombining -ErrorAction Stop"
+        } else {
+            "Disable-MMAgent -PageCombining -ErrorAction Stop"
+        };
+        run_powershell_checked(&format!(
+            "Start-Service SysMain -ErrorAction SilentlyContinue; {pre_cmd}; {pc_cmd}"
+        ))?;
+        backups.remove(self.meta.id)?;
+        Ok("Flags MMAgent restauradas ao estado original.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        run_powershell_checked(
+            "Start-Service SysMain -ErrorAction SilentlyContinue; Enable-MMAgent -ApplicationPreLaunch -ErrorAction Stop",
+        )?;
+        Ok("ApplicationPreLaunch reativado (padrão do Windows).".into())
     }
 }
