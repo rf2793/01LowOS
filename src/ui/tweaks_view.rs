@@ -245,8 +245,9 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
 
     ui.horizontal_wrapped(|ui| {
         if ui
-            .button("Selecionar todas")
+            .add_enabled(!app.checking_all, egui::Button::new("Selecionar todas"))
             .on_hover_text("Marca todas as otimizações visíveis aplicáveis (respeita os filtros ativos).")
+            .on_disabled_hover_text("Aguarde a verificação inicial terminar...")
             .clicked()
         {
             for (id, _, is_na) in &visible_ids {
@@ -255,7 +256,11 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                 }
             }
         }
-        if ui.button("Selecionar Risco Baixo").clicked() {
+        if ui
+            .add_enabled(!app.checking_all, egui::Button::new("Selecionar Risco Baixo"))
+            .on_disabled_hover_text("Aguarde a verificação inicial terminar...")
+            .clicked()
+        {
             for (id, risk, is_na) in &visible_ids {
                 if *risk == RiskLevel::Low && !*is_na {
                     app.selected_tweaks.insert(id.clone());
@@ -263,11 +268,12 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
             }
         }
         if ui
-            .add(
-                egui::Button::new("Preset Jogos Seguro")
-                    .fill(Color32::from_rgb(17, 66, 50)),
+            .add_enabled(
+                !app.checking_all,
+                egui::Button::new("Preset Jogos Seguro").fill(Color32::from_rgb(17, 66, 50)),
             )
             .on_hover_text("Seleciona os ajustes de maior impacto real para jogos sem desligar Wi-Fi, impressora, SMB, UAC ou SmartScreen.")
+            .on_disabled_hover_text("Aguarde a verificação inicial terminar...")
             .clicked()
         {
             app.selected_tweaks.clear();
@@ -298,10 +304,15 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         let sel_count = app.selected_tweaks.len();
         if ui
             .add_enabled(
-                sel_count > 0,
+                sel_count > 0 && !app.checking_all,
                 egui::Button::new(format!("Aplicar selecionadas ({sel_count})"))
                     .fill(Color32::from_rgb(14, 116, 144)),
             )
+            .on_disabled_hover_text(if app.checking_all {
+                "Aguarde a verificação inicial terminar..."
+            } else {
+                "Selecione ao menos uma melhoria aplicável."
+            })
             .clicked()
         {
             let batch: Vec<_> = catalog
@@ -553,7 +564,9 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
+                                    let status_known = app.statuses.contains_key(meta.id);
                                     let can_apply = !is_busy
+                                        && status_known
                                         && (!meta.requires_admin || app.elevated)
                                         && !matches!(status, TweakStatus::NotApplicable(_));
                                     let can_revert = !is_busy
@@ -616,6 +629,8 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                                         )
                                         .on_disabled_hover_text(if is_busy {
                                             "Operação em andamento..."
+                                        } else if !status_known {
+                                            "Verificando status inicial..."
                                         } else if matches!(status, TweakStatus::NotApplicable(_)) {
                                             "Não aplicável neste computador/hardware."
                                         } else {

@@ -521,6 +521,9 @@ impl LowOsApp {
                     status,
                     has_backup,
                 } => {
+                    if matches!(status, TweakStatus::NotApplicable(_)) {
+                        self.selected_tweaks.remove(&id);
+                    }
                     self.statuses.insert(id.clone(), status);
                     self.backup_flags.insert(id, has_backup);
                 }

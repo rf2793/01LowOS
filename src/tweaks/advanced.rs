@@ -4815,6 +4815,12 @@ impl Tweak for ReservedStorageOffTweak {
     }
 
     fn check(&self) -> TweakStatus {
+        let scenario = Self::active_scenario();
+        if scenario != 0 {
+            return TweakStatus::NotApplicable(format!(
+                "Em uso pelo Windows Update (ActiveScenario={scenario}) — conclua/pause atualizações e reinicie o PC"
+            ));
+        }
         if !crate::sys::elevation::is_elevated() {
             return TweakStatus::NotApplicable("Requer Admin para verificar".into());
         }
@@ -5153,9 +5159,226 @@ impl Tweak for AmdDeepSleepAspmOffTweak {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WinGuid {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
+const BEST_PERF_OVERLAY_GUID: WinGuid = WinGuid {
+    data1: 0xded5_74b5,
+    data2: 0x45a0,
+    data3: 0x4f42,
+    data4: [0x87, 0x37, 0x46, 0x34, 0x5c, 0x09, 0xc2, 0x38],
+};
+
+const BALANCED_OVERLAY_GUID: WinGuid = WinGuid {
+    data1: 0,
+    data2: 0,
+    data3: 0,
+    data4: [0; 8],
+};
+
+impl WinGuid {
+    fn to_uuid_string(self) -> String {
+        format!(
+            "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            self.data1,
+            self.data2,
+            self.data3,
+            self.data4[0],
+            self.data4[1],
+            self.data4[2],
+            self.data4[3],
+            self.data4[4],
+            self.data4[5],
+            self.data4[6],
+            self.data4[7]
+        )
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        let clean = s.trim().trim_start_matches('{').trim_end_matches('}');
+        let hex: String = clean.chars().filter(|c| *c != '-').collect();
+        if hex.len() != 32 {
+            return None;
+        }
+        let data1 = u32::from_str_radix(&hex[0..8], 16).ok()?;
+        let data2 = u16::from_str_radix(&hex[8..12], 16).ok()?;
+        let data3 = u16::from_str_radix(&hex[12..16], 16).ok()?;
+        let mut data4 = [0u8; 8];
+        for (i, slot) in data4.iter_mut().enumerate() {
+            let start = 16 + i * 2;
+            *slot = u8::from_str_radix(&hex[start..start + 2], 16).ok()?;
+        }
+        Some(Self {
+            data1,
+            data2,
+            data3,
+            data4,
+        })
+    }
+}
+
+type PfnPowerGetActualOverlayScheme = unsafe extern "system" fn(*mut WinGuid) -> u32;
+type PfnPowerSetActiveOverlayScheme = unsafe extern "system" fn(*const WinGuid) -> u32;
+
+fn query_actual_overlay_scheme() -> Result<Option<WinGuid>, String> {
+    use windows_sys::Win32::Foundation::FreeLibrary;
+    use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+
+    let dll: Vec<u16> = "powrprof.dll\0".encode_utf16().collect();
+    let hmod = unsafe { LoadLibraryW(dll.as_ptr()) };
+    if hmod.is_null() {
+        return Ok(None);
+    }
+
+    let get_proc = unsafe { GetProcAddress(hmod, c"PowerGetActualOverlayScheme".as_ptr().cast::<u8>()) };
+    let set_proc = unsafe { GetProcAddress(hmod, c"PowerSetActiveOverlayScheme".as_ptr().cast::<u8>()) };
+    let (Some(get_fn), Some(_)) = (get_proc, set_proc) else {
+        unsafe {
+            FreeLibrary(hmod);
+        }
+        return Ok(None);
+    };
+
+    let func: PfnPowerGetActualOverlayScheme = unsafe { std::mem::transmute(get_fn) };
+    let mut guid = BALANCED_OVERLAY_GUID;
+    let rc = unsafe { func(&mut guid as *mut WinGuid) };
+    unsafe {
+        FreeLibrary(hmod);
+    }
+    if rc != 0 {
+        return Err(format!(
+            "PowerGetActualOverlayScheme falhou (código Win32 {rc})"
+        ));
+    }
+    Ok(Some(guid))
+}
+
+fn set_active_overlay_scheme(guid: &WinGuid) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::FreeLibrary;
+    use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+
+    let dll: Vec<u16> = "powrprof.dll\0".encode_utf16().collect();
+    let hmod = unsafe { LoadLibraryW(dll.as_ptr()) };
+    if hmod.is_null() {
+        return Err("Não foi possível carregar powrprof.dll.".into());
+    }
+
+    let set_proc = unsafe { GetProcAddress(hmod, c"PowerSetActiveOverlayScheme".as_ptr().cast::<u8>()) };
+    let Some(set_fn) = set_proc else {
+        unsafe {
+            FreeLibrary(hmod);
+        }
+        return Err("API PowerSetActiveOverlayScheme indisponível nesta versão do Windows.".into());
+    };
+
+    let func: PfnPowerSetActiveOverlayScheme = unsafe { std::mem::transmute(set_fn) };
+    let rc = unsafe { func(guid as *const WinGuid) };
+    unsafe {
+        FreeLibrary(hmod);
+    }
+    if rc != 0 {
+        return Err(format!(
+            "PowerSetActiveOverlayScheme falhou (código Win32 {rc})"
+        ));
+    }
+    Ok(())
+}
+
+pub struct PowerOverlayBestPerfTweak {
+    meta: TweakMeta,
+}
+
+impl PowerOverlayBestPerfTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "power.overlay_best_perf",
+                name: "Energia Win11: Modo de Energia em 'Melhor desempenho' na tomada",
+                category: Category::Power,
+                risk: RiskLevel::Low,
+                requires_reboot: false,
+                requires_admin: false,
+                description: "Define o Modo de Energia moderno do Windows 11 para 'Melhor desempenho' (ded574b5-45a0-4f42-8737-46345c09c238) via API nativa powrprof.dll (PowerSetActiveOverlayScheme), sem precisar alterar permissões do registro.",
+                details: vec![
+                    "powrprof.dll::PowerSetActiveOverlayScheme(ded574b5-45a0-4f42-8737-46345c09c238)".into(),
+                ],
+            },
+        }
+    }
+}
+
+impl Tweak for PowerOverlayBestPerfTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        match query_actual_overlay_scheme() {
+            Ok(None) => {
+                TweakStatus::NotApplicable("API Power Overlay indisponível nesta versão do Windows".into())
+            }
+            Ok(Some(g)) if g == BEST_PERF_OVERLAY_GUID => TweakStatus::Applied,
+            Ok(Some(_)) => TweakStatus::NotApplied,
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let prev = query_actual_overlay_scheme()?
+            .ok_or("API Power Overlay indisponível nesta versão do Windows.")?;
+        if prev == BEST_PERF_OVERLAY_GUID {
+            return Ok("Modo de Energia já está em 'Melhor desempenho'.".into());
+        }
+        let created = backups.save_if_absent(
+            self.meta.id,
+            serde_json::json!({ "previous_guid": prev.to_uuid_string() }),
+        )?;
+        if let Err(e) = set_active_overlay_scheme(&BEST_PERF_OVERLAY_GUID) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
+        Ok("Modo de Energia definido para 'Melhor desempenho' via powrprof.dll.".into())
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup do Modo de Energia encontrado.".into());
+        };
+        let prev = rec.data["previous_guid"]
+            .as_str()
+            .and_then(WinGuid::parse)
+            .unwrap_or(BALANCED_OVERLAY_GUID);
+        set_active_overlay_scheme(&prev)?;
+        backups.remove(self.meta.id)?;
+        Ok(format!(
+            "Modo de Energia restaurado para {} via powrprof.dll.",
+            prev.to_uuid_string()
+        ))
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        set_active_overlay_scheme(&BALANCED_OVERLAY_GUID)?;
+        Ok("Modo de Energia restaurado ao padrão (Equilibrado).".into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ReservedStorageOffTweak;
+    use super::{
+        BALANCED_OVERLAY_GUID, BEST_PERF_OVERLAY_GUID, ReservedStorageOffTweak, WinGuid,
+    };
 
     #[test]
     fn format_reserved_storage_err_maps_0x800f0975_and_preserves_other_errors() {
@@ -5167,5 +5390,25 @@ mod tests {
 
         let other = ReservedStorageOffTweak::format_reserved_storage_err("Outro erro qualquer".into());
         assert_eq!(other, "Outro erro qualquer");
+    }
+
+    #[test]
+    fn win_guid_roundtrip_works_for_overlay_guids() {
+        assert_eq!(
+            BEST_PERF_OVERLAY_GUID.to_uuid_string(),
+            "ded574b5-45a0-4f42-8737-46345c09c238"
+        );
+        assert_eq!(
+            WinGuid::parse("{DED574B5-45A0-4F42-8737-46345C09C238}"),
+            Some(BEST_PERF_OVERLAY_GUID)
+        );
+        assert_eq!(
+            BALANCED_OVERLAY_GUID.to_uuid_string(),
+            "00000000-0000-0000-0000-000000000000"
+        );
+        assert_eq!(
+            WinGuid::parse("00000000-0000-0000-0000-000000000000"),
+            Some(BALANCED_OVERLAY_GUID)
+        );
     }
 }

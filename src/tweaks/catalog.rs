@@ -8,7 +8,8 @@ use crate::tweaks::advanced::{
     GpuNicMsiModeTweak, HdAudioIdleOffTweak, HypervisorOffTweak, LegacyHardwareIrqTweak,
     MemoryCompressionTweak, MmAgentPrelaunchTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak,
     NvidiaHdcpOffTweak, NvidiaTelemetryTweak, NvmeStorageMsiTweak, OptionalFeaturesTweak,
-    PnpUnusedDevicesTweak, PresentMonFpsTweak, ReservedStorageOffTweak, SmartScreenAclTweak,
+    PnpUnusedDevicesTweak, PowerOverlayBestPerfTweak, PresentMonFpsTweak, ReservedStorageOffTweak,
+    SmartScreenAclTweak,
     SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak, UsbAudioMsiModeTweak,
     UsbD3SuspendTweak, UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
 };
@@ -557,30 +558,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
 
     // 3. ENERGIA
     list.push(Box::new(PowerPlanTweak::new()));
-    list.push(Box::new(RegistryTweak::with_defaults(
-        TweakMeta {
-            id: "power.overlay_best_perf",
-            name: "Energia Win11: Modo de Energia em 'Melhor desempenho' na tomada",
-            category: Category::Power,
-            risk: RiskLevel::Low,
-            requires_reboot: false,
-            requires_admin: true,
-            description: "Define ActiveOverlayAcPowerScheme para o GUID oficial 'Best Performance' (ded574b5-45a0-4f42-8737-46345c09c238) nas Configurações modernas do Windows 11, evitando redução de boost da CPU em cargas médias.",
-            details: vec![],
-        },
-        vec![RegOp::set(
-            RegHive::Hklm,
-            r"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes",
-            "ActiveOverlayAcPowerScheme",
-            sz("ded574b5-45a0-4f42-8737-46345c09c238"),
-        )],
-        vec![RegOp::set(
-            RegHive::Hklm,
-            r"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes",
-            "ActiveOverlayAcPowerScheme",
-            sz("00000000-0000-0000-0000-000000000000"),
-        )],
-    )));
+    list.push(Box::new(PowerOverlayBestPerfTweak::new()));
     list.push(Box::new(HiberfilOffTweak::new()));
     list.push(Box::new(DeviceWakeTweak::new()));
     list.push(Box::new(UsbDevicePowerMgmtTweak::new()));
