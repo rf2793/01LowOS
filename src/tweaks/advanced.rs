@@ -726,7 +726,7 @@ if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
         let rows: Vec<AppxBackupEntry> =
             serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
         if rows.is_empty() {
-            return Ok("Nenhum dos 21 pacotes AppX alvo está instalado.".into());
+            return Ok(format!("Nenhum dos {} pacotes AppX alvo está instalado.", SYSTEM_APPX_LIST.len()));
         }
         let json = serde_json::to_value(&rows).map_err(|e| e.to_string())?;
         let created = backups.save_if_absent(self.meta.id, json)?;
@@ -2494,6 +2494,10 @@ const CONSUMER_APPX_LIST: &[&str] = &[
     "MicrosoftWindows.CrossDevice",
     "Microsoft.WidgetsPlatformRuntime",
     "Microsoft.XboxSpeechToTextOverlay",
+    "MicrosoftCorporationII.MicrosoftFamily",
+    "Microsoft.BingFinance",
+    "Microsoft.BingSports",
+    "Microsoft.Windows.Ai.Copilot.Provider",
 ];
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2517,7 +2521,7 @@ impl ConsumerAppxTweak {
                 risk: RiskLevel::Low,
                 requires_reboot: false,
                 requires_admin: true,
-                description: "Remove Copilot, Widgets (WebExperience), Clipchamp, Bing News/Weather/Search, Outlook Novo, Teams, Phone Link, GetHelp, Solitaire, QuickAssist, DevHome e afins. Preserva Microsoft Store, Xbox/GamingServices, Captura de Tela, Calculadora, Paint, Fotos, Bloco de Notas e Terminal. Reversível (ou reinstalável pela Store).",
+                description: "Remove Copilot/Copilot Provider, Widgets (WebExperience), Clipchamp, Bing News/Weather/Search/Finance/Sports, Outlook Novo, Teams, Phone Link, Family Safety, GetHelp, Solitaire, QuickAssist, DevHome e afins. Preserva Microsoft Store, Xbox/GamingServices, Captura de Tela, Calculadora, Paint, Fotos, Bloco de Notas e Terminal. Reversível (ou reinstalável pela Store).",
                 details: CONSUMER_APPX_LIST
                     .iter()
                     .map(|n| format!("AppX consumo: {n}"))
@@ -2594,7 +2598,7 @@ if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
         let rows: Vec<ConsumerAppxEntry> =
             serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
         if rows.is_empty() {
-            return Ok("Nenhum dos 24 apps bloatware de consumo está instalado.".into());
+            return Ok(format!("Nenhum dos {} apps bloatware de consumo está instalado.", CONSUMER_APPX_LIST.len()));
         }
         let json = serde_json::to_value(&rows).map_err(|e| e.to_string())?;
         let created = backups.save_if_absent(self.meta.id, json)?;

@@ -637,7 +637,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(WinInetWpadTweak::new()));
 
     // 5. USUÁRIO (HKCU)
-    list.push(Box::new(RegistryTweak::new(
+    list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "user.mouse_raw",
             name: "Mouse RAW 1:1 (sem aceleração nem atraso)",
@@ -667,17 +667,26 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
                 0x00,0xc0,0xbb,0x01,0x00,0x00,0x00,0x00,
             ])),
         ],
+        vec![
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Mouse", "MouseSpeed", sz("1")),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Mouse", "MouseThreshold1", sz("6")),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Mouse", "MouseThreshold2", sz("10")),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Mouse", "MouseSensitivity", sz("10")),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Mouse", "MouseHoverTime", sz("400")),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Mouse", "MouseTrails", sz("0")),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Mouse", "MouseDelay", sz("0")),
+        ],
     )));
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "user.keyboard_accessibility",
-            name: "Teclado rápido + Desativar atalhos de acessibilidade (5x Shift) e Snipping no Print",
+            name: "Teclado rápido + Desativar atalhos de acessibilidade (5x Shift/HighContrast/MouseKeys) e Snipping no Print",
             category: Category::UserHkcu,
             risk: RiskLevel::Low,
             requires_reboot: false,
             requires_admin: false,
-            description: "Define KeyboardDelay=0, KeyboardSpeed=31, NumLock ligado, desliga gatilhos de StickyKeys/FilterKeys/ToggleKeys que tiram o jogo de tela cheia e volta PrintScreen ao print clássico.",
+            description: "Define KeyboardDelay=0, KeyboardSpeed=31, NumLock ligado, desliga gatilhos de StickyKeys/FilterKeys/ToggleKeys, HighContrast (Alt+Shift+PrintScreen) e MouseKeys (Alt+Shift+NumLock) que tiram o jogo de tela cheia e volta PrintScreen ao print clássico.",
             details: vec![],
         },
         vec![
@@ -688,6 +697,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hkcu, r"Control Panel\Accessibility\StickyKeys", "Flags", sz("506")),
             RegOp::set(RegHive::Hkcu, r"Control Panel\Accessibility\Keyboard Response", "Flags", sz("122")),
             RegOp::set(RegHive::Hkcu, r"Control Panel\Accessibility\ToggleKeys", "Flags", sz("58")),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Accessibility\HighContrast", "Flags", sz("122")),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Accessibility\MouseKeys", "Flags", sz("58")),
         ],
         vec![
             RegOp::set(RegHive::Hkcu, r"Control Panel\Keyboard", "KeyboardDelay", sz("1")),
@@ -695,6 +706,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hkcu, r"Control Panel\Accessibility\StickyKeys", "Flags", sz("510")),
             RegOp::set(RegHive::Hkcu, r"Control Panel\Accessibility\Keyboard Response", "Flags", sz("126")),
             RegOp::set(RegHive::Hkcu, r"Control Panel\Accessibility\ToggleKeys", "Flags", sz("62")),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Accessibility\HighContrast", "Flags", sz("126")),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\Accessibility\MouseKeys", "Flags", sz("62")),
         ],
     )));
 
@@ -841,7 +854,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         vec![RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Multimedia\Audio", "UserDuckingPreference", dw(2))],
     )));
 
-    list.push(Box::new(RegistryTweak::new(
+    list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "user.privacy_hkcu",
             name: "Privacidade HKCU: Sem apps em 2º plano, sugestões, anúncios, histórico de clipboard e proteção de tela",
@@ -885,6 +898,23 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Privacy", "TailoredExperiencesWithDiagnosticDataEnabled", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Personalization\Settings", "AcceptedPrivacyPolicy", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Control Panel\International\User Profile", "HttpAcceptLanguageOptOut", dw(1)),
+        ],
+        vec![
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Clipboard", "EnableClipboardHistory", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"SOFTWARE\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications", "GlobalUserDisabled", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager", "ContentDeliveryAllowed", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager", "FeatureManagementEnabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager", "SystemPaneSuggestionsEnabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager", "RotatingLockScreenEnabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager", "RotatingLockScreenOverlayEnabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement", "ScoobeSystemSettingEnabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo", "Enabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\InputPersonalization", "RestrictImplicitInkCollection", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\InputPersonalization", "RestrictImplicitTextCollection", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Input\TIPC", "Enabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Privacy", "TailoredExperiencesWithDiagnosticDataEnabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Personalization\Settings", "AcceptedPrivacyPolicy", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Control Panel\International\User Profile", "HttpAcceptLanguageOptOut", dw(0)),
         ],
     )));
 

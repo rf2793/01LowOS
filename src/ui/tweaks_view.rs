@@ -21,9 +21,12 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         });
     });
     ui.label(
-        RichText::new("Cada melhoria possui snapshot e backup independente em C:\\ProgramData\\01LowOS\\Backups\\tweaks para reversão segura.")
-            .small()
-            .color(Color32::from_rgb(148, 163, 184)),
+        RichText::new(format!(
+            "Cada melhoria possui snapshot e backup independente em {} para reversão segura.",
+            app.backups.dir().display()
+        ))
+        .small()
+        .color(Color32::from_rgb(148, 163, 184)),
     );
     ui.add_space(8.0);
 

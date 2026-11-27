@@ -78,7 +78,7 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                         _ => pending += 1,
                     }
                     rows.push(format!(
-                        "{:<30} | {:<28} | {:<6} | {:<20} | {}",
+                        "{:<40} | {:<28} | {:<6} | {:<20} | {}",
                         m.id,
                         st.label(),
                         if has_bk { "SIM" } else { "-" },
@@ -111,10 +111,10 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                 ));
                 out.push("=========================================================================".to_string());
                 out.push(format!(
-                    "{:<30} | {:<28} | {:<6} | {:<20} | {}",
+                    "{:<40} | {:<28} | {:<6} | {:<20} | {}",
                     "ID", "Status", "Backup", "Categoria", "Nome"
                 ));
-                out.push("-".repeat(120));
+                out.push("-".repeat(130));
                 out.extend(rows);
 
                 match std::fs::write(&report_path, out.join("\r\n")) {

@@ -39,12 +39,12 @@ fn run_list() -> i32 {
         eprintln!("ERRO no catálogo: {e}");
         return 1;
     }
-    println!("{:<32} | {:<20} | {:<6} | Nome", "ID", "Categoria", "Risco");
-    println!("{}", "-".repeat(100));
+    println!("{:<40} | {:<20} | {:<6} | Nome", "ID", "Categoria", "Risco");
+    println!("{}", "-".repeat(108));
     for t in &catalog {
         let m = t.meta();
         println!(
-            "{:<32} | {:<20} | {:<6} | {}",
+            "{:<40} | {:<20} | {:<6} | {}",
             m.id,
             m.category.label(),
             m.risk.label(),
@@ -63,15 +63,15 @@ fn run_status() -> i32 {
         if is_elevated() { "SIM" } else { "NÃO" }
     );
     println!(
-        "{:<32} | {:<26} | {:<8} | Nome",
+        "{:<40} | {:<26} | {:<8} | Nome",
         "ID", "Status", "Backup"
     );
-    println!("{}", "-".repeat(105));
+    println!("{}", "-".repeat(113));
     for t in &catalog {
         let m = t.meta();
         let st = t.check();
         let bk = if backups.exists(m.id) { "SIM" } else { "-" };
-        println!("{:<32} | {:<26} | {:<8} | {}", m.id, st.label(), bk, m.name);
+        println!("{:<40} | {:<26} | {:<8} | {}", m.id, st.label(), bk, m.name);
     }
     0
 }
