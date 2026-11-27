@@ -109,11 +109,14 @@ pub fn run_powershell(script: &str) -> Result<CmdOutput, String> {
 pub fn run_powershell_checked(script: &str) -> Result<CmdOutput, String> {
     let out = run_powershell(script)?;
     if !out.success() {
-        return Err(format!(
-            "PowerShell falhou (código {}): {}",
-            out.code,
-            out.combined()
-        ));
+        let detail = out.combined();
+        let detail = if detail.is_empty() {
+            // -Command devolve 1 quando o ultimo comando deixa $? falso, mesmo silenciado.
+            "sem mensagem (o ultimo comando do script terminou com $? falso)".to_string()
+        } else {
+            detail
+        };
+        return Err(format!("PowerShell falhou (código {}): {detail}", out.code));
     }
     Ok(out)
 }
@@ -150,7 +153,15 @@ pub fn spawn_detached_self(arg: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_windows_output;
+    use super::{decode_windows_output, run_powershell_checked};
+
+    #[test]
+    fn silenced_failure_on_last_line_needs_explicit_exit_zero() {
+        let tail = "Get-Process NaoExiste01LowOS -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue";
+        let bad = run_powershell_checked(tail).unwrap_err();
+        assert!(bad.contains("sem mensagem"), "{bad}");
+        assert!(run_powershell_checked(&format!("{tail}\nexit 0")).is_ok());
+    }
 
     #[test]
     fn decode_windows_output_handles_utf8_and_oem_bytes() {

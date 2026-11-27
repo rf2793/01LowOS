@@ -98,18 +98,65 @@ impl BackupStore {
             created_at: Local::now().to_rfc3339(),
             data,
         };
-        let json = serde_json::to_string_pretty(&rec)
-            .map_err(|e| format!("Falha ao serializar backup de {tweak_id}: {e}"))?;
+        Self::write_record(&path, &rec)?;
+        Ok(true)
+    }
+
+    fn write_record(path: &Path, rec: &BackupRecord) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(rec)
+            .map_err(|e| format!("Falha ao serializar backup de {}: {e}", rec.tweak_id))?;
         // Grava em arquivo temporario e renomeia: uma queda de energia no meio da escrita
         // nunca deixa um .json truncado (que tornaria a reversao impossivel).
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, json)
             .map_err(|e| format!("Falha ao gravar backup {:?}: {e}", tmp))?;
-        fs::rename(&tmp, &path).map_err(|e| {
+        fs::rename(&tmp, path).map_err(|e| {
             let _ = fs::remove_file(&tmp);
             format!("Falha ao finalizar backup {:?}: {e}", path)
-        })?;
-        Ok(true)
+        })
+    }
+
+    /// Para backups no formato {secao: [itens]}: cria o backup se nao existir; se existir,
+    /// mantem o estado original dos itens ja salvos e acrescenta so os itens novos (identidade
+    /// dada por `key_of(secao, item)`). Sem isso, itens instalados depois do primeiro apply
+    /// (ex.: tarefa do Google Updater com nome de versao nova) ficam sem reversao.
+    /// Retorna (backup_criado_agora, itens_acrescentados).
+    pub fn save_or_merge_lists<F>(
+        &self,
+        tweak_id: &str,
+        data: serde_json::Value,
+        key_of: F,
+    ) -> Result<(bool, usize), String>
+    where
+        F: Fn(&str, &serde_json::Value) -> String,
+    {
+        let Some(mut rec) = self.load(tweak_id)? else {
+            return self.save_if_absent(tweak_id, data).map(|c| (c, 0));
+        };
+        let (Some(old), Some(new)) = (rec.data.as_object_mut(), data.as_object()) else {
+            return Err(format!("Backup de {tweak_id} nao tem o formato de listas esperado."));
+        };
+        let mut added = 0usize;
+        for (section, items) in new {
+            let Some(items) = items.as_array() else { continue };
+            let slot = old
+                .entry(section.clone())
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+            let Some(saved) = slot.as_array_mut() else {
+                return Err(format!("Secao '{section}' do backup de {tweak_id} nao e uma lista."));
+            };
+            for item in items {
+                let key = key_of(section, item);
+                if !saved.iter().any(|s| key_of(section, s) == key) {
+                    saved.push(item.clone());
+                    added += 1;
+                }
+            }
+        }
+        if added > 0 {
+            Self::write_record(&self.record_path(tweak_id), &rec)?;
+        }
+        Ok((false, added))
     }
 
     pub fn load(&self, tweak_id: &str) -> Result<Option<BackupRecord>, String> {
@@ -188,6 +235,35 @@ mod tests {
 
         store.remove("gpu.hags").unwrap();
         assert!(!store.exists("gpu.hags"));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn merge_keeps_original_state_and_adds_only_new_items() {
+        let tmp = std::env::temp_dir().join(format!(
+            "01lowos_backup_merge_test_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        let store = BackupStore::with_dir(tmp.clone());
+        let key = |_: &str, v: &serde_json::Value| v["Name"].as_str().unwrap_or("").to_string();
+
+        let first = json!({"servicos": [{"Name": "A", "StartMode": "Auto"}]});
+        assert_eq!(store.save_or_merge_lists("t", first, key).unwrap(), (true, 0));
+
+        // "A" reaparece com outro estado (nao pode sobrescrever o original); "B" e novo.
+        let second = json!({
+            "servicos": [{"Name": "A", "StartMode": "Manual"}, {"Name": "B", "StartMode": "Auto"}],
+            "tarefas": [{"Name": "T1"}]
+        });
+        assert_eq!(store.save_or_merge_lists("t", second.clone(), key).unwrap(), (false, 2));
+        assert_eq!(store.save_or_merge_lists("t", second, key).unwrap(), (false, 0));
+
+        let data = store.load("t").unwrap().unwrap().data;
+        assert_eq!(data["servicos"].as_array().unwrap().len(), 2);
+        assert_eq!(data["servicos"][0]["StartMode"], "Auto");
+        assert_eq!(data["servicos"][1]["Name"], "B");
+        assert_eq!(data["tarefas"][0]["Name"], "T1");
         let _ = fs::remove_dir_all(&tmp);
     }
 }

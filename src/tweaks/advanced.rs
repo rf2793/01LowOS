@@ -1421,7 +1421,19 @@ $snap | ConvertTo-Json -Depth 4 -Compress
         if count == 0 {
             return Ok("0 item(ns) de terceiros pendentes.".into());
         }
-        let created = backups.save_if_absent(self.meta.id, val.clone())?;
+        // Mescla em vez de save_if_absent: um backup antigo nao pode esconder itens novos.
+        let (created, _) = backups.save_or_merge_lists(self.meta.id, val.clone(), |section, item| {
+            match section {
+                "tarefas" => format!(
+                    "{}{}",
+                    item["TaskPath"].as_str().unwrap_or(""),
+                    item["TaskName"].as_str().unwrap_or("")
+                ),
+                // Valor unico: so o estado original (o primeiro salvo) importa.
+                "amd" => String::new(),
+                _ => item["Name"].as_str().unwrap_or("").to_string(),
+            }
+        })?;
         let escaped = serde_json::to_string(&val)
             .map_err(|e| e.to_string())?
             .replace('\'', "''");
@@ -1455,6 +1467,8 @@ foreach ($i in @($snap.inicializacao)) {{
     New-ItemProperty -LiteralPath $apKey -Name $i.Name -Value ([byte[]](3,0,0,0,0,0,0,0,0,0,0,0)) -PropertyType Binary -Force | Out-Null
 }}
 Get-Process AMDInstallManager -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# Sem isto, o $? falso do Get-Process silenciado (processo ausente) vira codigo 1 sem mensagem.
+exit 0
 "#
         );
         if let Err(e) = run_powershell_checked(&apply_script) {
@@ -1477,14 +1491,18 @@ Get-Process AMDInstallManager -ErrorAction SilentlyContinue | Stop-Process -Forc
             r#"
 $snap = ConvertFrom-Json '{escaped}'
 $map = @{{ Auto='Automatic'; Manual='Manual'; Disabled='Disabled' }}
+$ausentes = 0
 foreach ($r in @($snap.servicos)) {{
     if (-not $r.Name) {{ continue }}
+    # Desinstalado ou trocado de versao (GoogleUpdater*): nao ha o que restaurar.
+    if (-not (Get-Service -Name $r.Name -ErrorAction SilentlyContinue)) {{ $ausentes++; continue }}
     Set-Service -Name $r.Name -StartupType $map[[string]$r.StartMode] -ErrorAction Stop
     if ($r.DelayedAutoStart) {{ & sc.exe config "$($r.Name)" start= delayed-auto | Out-Null }}
     if ($r.StartMode -eq 'Auto') {{ Start-Service -Name $r.Name -ErrorAction SilentlyContinue }}
 }}
 foreach ($t in @($snap.tarefas)) {{
     if (-not $t.TaskName) {{ continue }}
+    if (-not (Get-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction SilentlyContinue)) {{ $ausentes++; continue }}
     Enable-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction Stop | Out-Null
 }}
 $apKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
@@ -1502,10 +1520,18 @@ foreach ($a in @($snap.amd)) {{
     if ($null -ne $a.DisableAutoUpdates) {{ Set-ItemProperty -LiteralPath $k -Name DisableAutoUpdates -Value ([int]$a.DisableAutoUpdates) -Type DWord }}
     else {{ Remove-ItemProperty -LiteralPath $k -Name DisableAutoUpdates -ErrorAction SilentlyContinue }}
 }}
+Write-Output $ausentes
+exit 0
 "#
         );
-        run_powershell_checked(&script)?;
+        let out = run_powershell_checked(&script)?;
         backups.remove(self.meta.id)?;
+        let ausentes: usize = out.stdout.trim().parse().unwrap_or(0);
+        if ausentes > 0 {
+            return Ok(format!(
+                "Itens de terceiros restaurados ({ausentes} nao existem mais no sistema e foram ignorados)."
+            ));
+        }
         Ok("Itens de terceiros restaurados.".into())
     }
 }
@@ -3828,6 +3854,8 @@ if ($paths.Count) {{ Add-MpPreference -ExclusionPath $paths -ErrorAction Stop }}
                 r#"
 $paths = [string[]]@((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }} | Where-Object {{ $_ }})
 if ($paths.Count) {{ Remove-MpPreference -ExclusionPath $paths -ErrorAction SilentlyContinue }}
+# Defender ausente (removido na ISO): falha silenciada nao pode virar codigo 1.
+exit 0
 "#
             );
             run_powershell_checked(&script)?;
