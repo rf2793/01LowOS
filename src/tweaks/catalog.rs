@@ -289,7 +289,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             risk: RiskLevel::High,
             requires_reboot: true,
             requires_admin: true,
-            description: "Define FeatureSettingsOverride=3 e FeatureSettingsOverrideMask=3 em Memory Management, reduzindo overhead de syscalls em jogos CPU-bound. Atenção: desativa proteções contra vulnerabilidades de hardware Spectre/Meltdown — use apenas em PC dedicado a jogos.",
+            description: "Define FeatureSettingsOverride=3 e FeatureSettingsOverrideMask=3 em Memory Management (mitigacoes Spectre v2/Meltdown). So faz diferenca em CPUs antigas (Intel ate ~9a geracao). Medicao do Phoronix: no Zen 5 (Ryzen 9000, inclusive 9800X3D) desligar as mitigacoes nao deu ganho; no Zen 4 o sistema foi ~3% mais rapido COM elas. Em AMD recente so remove protecao. Atencao: desativa protecoes contra vulnerabilidades de hardware.",
             details: vec![],
         },
         vec![
@@ -358,12 +358,12 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "sys.win32_priority_separation",
-            name: "Agendador CPU: Win32PrioritySeparation=0x26 (Short, Fixed, High Foreground)",
+            name: "Agendador CPU: Win32PrioritySeparation=0x26 (Short, Variable, High Foreground)",
             category: Category::SystemKernel,
             risk: RiskLevel::Low,
             requires_reboot: false,
             requires_admin: true,
-            description: "Ajusta o quantum do agendador de threads do Windows para fatias curtas e fixas com prioridade máxima para a janela em primeiro plano (0x26 / 38 decimal), melhorando consistência de frametime e 1% low.",
+            description: "Bitmask AABBCC da Microsoft: 0x26 (38) = quantum curto (10), variavel (01) e reforco alto 3:1 para o processo em primeiro plano (10). O reforco so vale com quantum variavel. Sem benchmark publicado de ganho em FPS ou 1% low; o padrao do Windows cliente e 0x2.",
             details: vec![],
         },
         vec![RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\PriorityControl", "Win32PrioritySeparation", dw(0x26))],
@@ -1556,12 +1556,12 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(ServiceGroupTweak::new(
         TweakMeta {
             id: "svc.gameinput_off",
-            name: "Serviço: Desativar GameInputSvc (picos de latência DPC Win11 24H2+)",
+            name: "Servico: Desativar GameInputSvc (Microsoft GameInput)",
             category: Category::WindowsServices,
             risk: RiskLevel::Medium,
             requires_reboot: true,
             requires_admin: true,
-            description: "Desativa o serviço Microsoft GameInput (GameInputSvc), causa conhecida de picos periódicos de latência DPC e micro-engasgos no Windows 11 24H2/25H2. Atenção: controles Xbox ou joysticks dependentes de GameInput podem parar até reverter; teclado e mouse continuam normais.",
+            description: "Desativa o servico Microsoft GameInput (GameInputSvc) para quem nao usa jogos/controles baseados em GameInput. Ha relatos de usuarios ligando-o a picos de DPC no 24H2, mas nenhuma medicao publicada confirma; nao espere ganho de FPS. Atencao: controles Xbox ou joysticks em jogos que usam GameInput podem parar ate reverter; teclado e mouse continuam normais.",
             details: vec![],
         },
         vec![ServiceTarget::disable("GameInputSvc")],

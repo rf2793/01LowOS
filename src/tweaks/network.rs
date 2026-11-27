@@ -666,7 +666,7 @@ impl NetRscUdpLatencyTweak {
                 risk: RiskLevel::Low,
                 requires_reboot: true,
                 requires_admin: true,
-                description: "Desativa Receive Segment Coalescing (RSC) e Packet Coalescing Filter para eliminar atraso por agrupamento de pacotes, e define AFD\\Parameters\\FastSendDatagramThreshold=1500 para caminho rápido de datagramas UDP em jogos online.",
+                description: "Desativa Receive Segment Coalescing (RSC) e Packet Coalescing Filter para eliminar atraso por agrupamento de pacotes, e define AFD\\Parameters\\FastSendDatagramThreshold=1500: datagramas UDP ate esse tamanho vao pelo caminho rapido de envio (padrao 1024). So muda algo para pacotes entre 1025 e 1500 bytes; pacotes de jogo costumam ser menores.",
                 details: vec![
                     "netsh int tcp set global rsc=disabled".into(),
                     "Set-NetOffloadGlobalSetting -PacketCoalescingFilter Disabled".into(),
@@ -850,15 +850,14 @@ impl NetQosNicFlowTweak {
         Self {
             meta: TweakMeta {
                 id: "net.qos_nic_flow_off",
-                name: "Rede: Remover limite QoS (20%) e desativar Flow Control / Offloads ARP-NS",
+                name: "Rede: Desativar Flow Control e Offloads ARP/NS de suspensao",
                 category: Category::Network,
                 risk: RiskLevel::Low,
                 requires_reboot: true,
                 requires_admin: true,
-                description: "Define Psched\\NonBestEffortLimit=0 (remove a reserva padrão de 20% de banda do Packet Scheduler) e desativa *FlowControl, *PMARPOffload/PMARPOffload, *PMNSOffload/PMNSOffload e PMWiFiRekeyOffload nos adaptadores físicos para evitar quadros PAUSE e offloads de suspensão.",
+                description: "Desativa *FlowControl, *PMARPOffload/PMARPOffload, *PMNSOffload/PMNSOffload e PMWiFiRekeyOffload nos adaptadores fisicos (evita quadros PAUSE e offloads de suspensao). Nao mexe mais no Psched\\NonBestEffortLimit: a 'reserva de 20% do QoS' e mito desmentido pela Microsoft (KB 316666); o revert ainda restaura esse valor para quem aplicou a versao antiga.",
                 details: vec![
-                    format!(r"HKLM\{PSCHED_KEY}\NonBestEffortLimit = 0"),
-                    "Adaptadores físicos: *FlowControl, *PMARPOffload/PMARPOffload, *PMNSOffload/PMNSOffload, PMWiFiRekeyOffload = 0".into(),
+                    "Adaptadores fisicos: *FlowControl, *PMARPOffload/PMARPOffload, *PMNSOffload/PMNSOffload, PMWiFiRekeyOffload = 0".into(),
                 ],
             },
         }
@@ -871,10 +870,6 @@ impl Tweak for NetQosNicFlowTweak {
     }
 
     fn check(&self) -> TweakStatus {
-        let qos_ok = usize::from(matches!(
-            read_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit"),
-            Ok(Some(RegValue::DWord(0)))
-        ));
         let keywords = QOS_NIC_PROPS
             .iter()
             .map(|k| format!("'{k}'"))
@@ -900,11 +895,11 @@ Write-Output "$zero/$total"
         match run_powershell_checked(&script) {
             Ok(out) => {
                 if let Some((a, b)) = out.stdout.trim().split_once('/') {
-                    let nic_ok: usize = a.parse().unwrap_or(0);
-                    let nic_total: usize = b.parse().unwrap_or(0);
-                    let ok = qos_ok + nic_ok;
-                    let total = 1 + nic_total;
-                    if ok == total {
+                    let ok: usize = a.parse().unwrap_or(0);
+                    let total: usize = b.parse().unwrap_or(0);
+                    if total == 0 {
+                        TweakStatus::NotApplicable("Nenhuma placa expoe Flow Control/offloads".into())
+                    } else if ok == total {
                         TweakStatus::Applied
                     } else if ok == 0 {
                         TweakStatus::NotApplied
@@ -950,20 +945,10 @@ if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
             qos_val: cur_qos,
             nic_props: nic_rows.clone(),
         };
+        // O valor do Psched continua no snapshot (mesmo formato de backup) para o revert
+        // restaurar quem aplicou a versao antiga, que gravava NonBestEffortLimit=0 (placebo).
         let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
         let created = backups.save_if_absent(self.meta.id, json)?;
-
-        if let Err(e) = write_value(
-            RegHive::Hklm,
-            PSCHED_KEY,
-            "NonBestEffortLimit",
-            &RegValue::DWord(0),
-        ) {
-            if created {
-                let _ = backups.remove(self.meta.id);
-            }
-            return Err(e);
-        }
 
         let mut ok_count = 0usize;
         if !nic_rows.is_empty() {
@@ -986,13 +971,6 @@ Write-Output $ok
             let res = match run_powershell_checked(&apply_script) {
                 Ok(r) => r,
                 Err(e) => {
-                    if snap.qos_existed {
-                        if let Some(ref v) = snap.qos_val {
-                            let _ = write_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit", v);
-                        }
-                    } else {
-                        let _ = delete_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit");
-                    }
                     if created {
                         let _ = backups.remove(self.meta.id);
                     }
@@ -1002,7 +980,7 @@ Write-Output $ok
             ok_count = res.stdout.trim().parse().unwrap_or(0);
         }
         Ok(format!(
-            "QoS NonBestEffortLimit=0 aplicado; {ok_count} propriedade(s) de Flow/Offload desativada(s)."
+            "{ok_count} propriedade(s) de Flow Control/Offload desativada(s)."
         ))
     }
 

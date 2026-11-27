@@ -3557,7 +3557,7 @@ impl NvidiaHdcpOffTweak {
                 risk: RiskLevel::Medium,
                 requires_reboot: true,
                 requires_admin: true,
-                description: "Define RMHdcpKeyglobZero=1 no driver NVIDIA para eliminar handshakes HDCP em Alt-Tab e trocas de resolução em tela cheia. Atenção: serviços de streaming 4K com DRM (Netflix, Prime Video, Disney+) exigem HDCP ativado.",
+                description: "Define RMHdcpKeyglobZero=1 no driver NVIDIA para pular o handshake HDCP (afeta so a reconexao/troca de entrada do monitor). Nenhuma medicao publicada mostra ganho de latencia ou FPS em jogo. Atencao: streaming com DRM (Netflix, Prime Video, Disney+) exige HDCP, e ha relatos (nao confirmados pela Valve/Sony) de SteamVR/headsets VR precisando de HDCP; se o VR ficar com tela preta, reverta este ajuste.",
                 details: vec![
                     format!(r"HKLM\{GPU_CLASS_KEY}\00xx\RMHdcpKeyglobZero = 1 (VEN_10DE)"),
                 ],
