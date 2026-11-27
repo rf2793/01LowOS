@@ -86,8 +86,6 @@ pub enum AppMsg {
         refresh_shaders: bool,
         refresh_temp: bool,
     },
-    RestoredFromTray,
-    QuitFromTray,
 }
 
 pub struct LowOsApp {
@@ -130,9 +128,7 @@ pub struct LowOsApp {
     pub self_test_busy: bool,
     pub session_logs: Vec<String>,
     pub banner: Option<(bool, String)>,
-    pub tray: Option<crate::sys::tray::TrayIcon>,
     pub minimized_to_tray: bool,
-    pub app_hwnd: Option<isize>,
     pub show_donate_modal: bool,
 
     pub cfg_exe_input: String,
@@ -215,9 +211,7 @@ impl LowOsApp {
                 if elevated { "SIM" } else { "NÃO" }
             )],
             banner: None,
-            tray: None,
             minimized_to_tray: false,
-            app_hwnd: None,
             show_donate_modal: false,
             cfg_exe_input: String::new(),
             cfg_disabled_list: Vec::new(),
@@ -667,60 +661,39 @@ impl LowOsApp {
                         self.trigger_scan_temp(ctx);
                     }
                 }
-                AppMsg::RestoredFromTray => {
-                    self.minimized_to_tray = false;
-                    self.tray = None;
-                }
-                AppMsg::QuitFromTray => {
-                    self.watchdog.stop();
-                    self.minimized_to_tray = false;
-                    self.tray = None;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
             }
         }
     }
 
     pub fn minimize_to_tray(&mut self, ctx: &egui::Context) {
-        let Some(hwnd) = self
-            .app_hwnd
-            .or_else(crate::sys::tray::find_own_visible_window)
-        else {
-            self.banner = Some((
-                false,
-                "Não foi possível localizar a janela para minimizar.".into(),
-            ));
-            return;
+        let exe = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(e) => {
+                self.banner = Some((false, format!("Falha ao localizar executável: {e}")));
+                return;
+            }
         };
-        self.app_hwnd = Some(hwnd);
 
-        if self.tray.is_none() {
-            let tx = self.tx.clone();
-            let ctx_cb = ctx.clone();
-            match crate::sys::tray::TrayIcon::new(
-                "01LowOS — Vigia de Afinidade",
-                Arc::new(move |action| match action {
-                    crate::sys::tray::TrayAction::Restore => {
-                        crate::sys::tray::restore_window(hwnd);
-                        let _ = tx.send(AppMsg::RestoredFromTray);
-                        ctx_cb.request_repaint();
-                    }
-                    crate::sys::tray::TrayAction::Exit => {
-                        let _ = tx.send(AppMsg::QuitFromTray);
-                        crate::sys::tray::close_window(hwnd);
-                        ctx_cb.request_repaint();
-                    }
-                }),
-            ) {
-                Ok(t) => self.tray = Some(t),
-                Err(e) => {
-                    self.banner = Some((false, format!("Falha ao criar ícone na bandeja: {e}")));
-                    return;
+        let was_running = self.watchdog.is_running();
+        if was_running {
+            self.watchdog.stop();
+        }
+
+        match std::process::Command::new(&exe).arg("--watchdog").spawn() {
+            Ok(_) => {
+                self.minimized_to_tray = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Err(e) => {
+                if was_running {
+                    self.watchdog.start();
                 }
+                self.banner = Some((
+                    false,
+                    format!("Falha ao iniciar Vigia na bandeja (--watchdog): {e}"),
+                ));
             }
         }
-        self.minimized_to_tray = true;
-        crate::sys::tray::hide_window(hwnd);
     }
 }
 
@@ -728,8 +701,10 @@ impl eframe::App for LowOsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.drain_messages(ctx);
 
-        if self.watchdog.is_running() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(800));
+        let is_minimized = self.minimized_to_tray
+            || ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        if self.watchdog.is_running() && self.tab == Tab::Watchdog && !is_minimized {
+            ctx.request_repaint_after(std::time::Duration::from_millis(1000));
         }
 
         // Left navigation sidebar
@@ -846,7 +821,7 @@ impl eframe::App for LowOsApp {
                     if ui
                         .add_enabled(self.elevated, autostart_btn)
                         .on_hover_text(
-                            "Inicia o Vigia de Afinidade + ISLC Standby Auto-Purge na bandeja 5s após o logon (sem UAC).",
+                            "Inicia o Vigia de Afinidade + ISLC Standby Auto-Purge na bandeja 8s após o logon (sem UAC).",
                         )
                         .on_disabled_hover_text(
                             "Execute como Administrador para configurar a inicialização com o Windows.",
@@ -1021,7 +996,6 @@ impl eframe::App for LowOsApp {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.watchdog.stop();
-        self.tray = None;
     }
 }
 

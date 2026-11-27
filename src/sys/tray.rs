@@ -2,20 +2,19 @@ use std::ptr::{null, null_mut};
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
-use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, BringWindowToTop, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-    DestroyWindow, DispatchMessageW, EnumWindows, GetCursorPos, GetMessageW, GetWindowLongPtrW,
-    GetWindowTextLengthW, GetWindowThreadProcessId, IsWindowVisible, LoadIconW, PostMessageW,
-    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
-    SetWindowLongPtrW, ShowWindow, TrackPopupMenu, TranslateMessage, CREATESTRUCTW, GWLP_USERDATA,
-    IDI_APPLICATION, MF_STRING, MSG, SW_HIDE, SW_RESTORE, SW_SHOW, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-    TPM_RIGHTBUTTON, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP,
-    WM_NULL, WM_RBUTTONUP, WM_USER, WNDCLASSW,
+    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
+    DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, GetWindowLongPtrW, LoadIconW,
+    PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
+    SetWindowLongPtrW, TrackPopupMenu, TranslateMessage, CREATESTRUCTW, GWLP_USERDATA,
+    IDI_APPLICATION, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WM_CLOSE,
+    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
+    WM_USER, WNDCLASSW,
 };
 
 use super::elevation::to_wide_null;
@@ -41,70 +40,6 @@ struct TrayWindowState {
 pub struct TrayIcon {
     hwnd_raw: isize,
     thread: Option<JoinHandle<()>>,
-}
-
-struct EnumSearch {
-    pid: u32,
-    found: isize,
-}
-
-unsafe extern "system" fn enum_own_window_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    let ctx = &mut *(lparam as *mut EnumSearch);
-    let mut pid: u32 = 0;
-    GetWindowThreadProcessId(hwnd, &mut pid);
-    if pid == ctx.pid && IsWindowVisible(hwnd) != 0 && GetWindowTextLengthW(hwnd) > 0 {
-        ctx.found = hwnd as isize;
-        return 0;
-    }
-    1
-}
-
-pub fn find_own_visible_window() -> Option<isize> {
-    let mut search = EnumSearch {
-        pid: std::process::id(),
-        found: 0,
-    };
-    unsafe {
-        EnumWindows(
-            Some(enum_own_window_cb),
-            (&mut search as *mut EnumSearch) as LPARAM,
-        );
-    }
-    if search.found != 0 {
-        Some(search.found)
-    } else {
-        None
-    }
-}
-
-pub fn hide_window(hwnd_raw: isize) {
-    if hwnd_raw != 0 {
-        unsafe {
-            ShowWindow(hwnd_raw as HWND, SW_HIDE);
-        }
-    }
-}
-
-pub fn restore_window(hwnd_raw: isize) {
-    if hwnd_raw != 0 {
-        unsafe {
-            let hwnd = hwnd_raw as HWND;
-            ShowWindow(hwnd, SW_SHOW);
-            ShowWindow(hwnd, SW_RESTORE);
-            SetForegroundWindow(hwnd);
-            BringWindowToTop(hwnd);
-        }
-    }
-}
-
-pub fn close_window(hwnd_raw: isize) {
-    if hwnd_raw != 0 {
-        unsafe {
-            let hwnd = hwnd_raw as HWND;
-            ShowWindow(hwnd, SW_SHOW);
-            PostMessageW(hwnd, WM_CLOSE, 0, 0);
-        }
-    }
 }
 
 impl TrayIcon {
