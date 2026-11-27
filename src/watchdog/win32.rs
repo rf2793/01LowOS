@@ -66,62 +66,38 @@ impl CpuTopology {
     }
 }
 
-pub fn detect_cpu_topology() -> CpuTopology {
-    let logical_count = unsafe {
-        let mut sys_info: SYSTEM_INFO = std::mem::zeroed();
-        GetSystemInfo(&mut sys_info);
-        sys_info.dwNumberOfProcessors.max(1) as usize
-    };
-
-    let physical_cores = unsafe {
-        let mut len: u32 = 0;
-        GetLogicalProcessorInformationEx(RelationProcessorCore, null_mut(), &mut len);
-        if len == 0 {
-            logical_count
-        } else {
-            let mut buf = vec![0u8; len as usize];
-            let ok = GetLogicalProcessorInformationEx(
-                RelationProcessorCore,
-                buf.as_mut_ptr() as *mut SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
-                &mut len,
-            );
-            if ok == 0 {
-                logical_count
-            } else {
-                let mut offset = 0usize;
-                let mut cores = 0usize;
-                while offset + std::mem::size_of::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>()
-                    <= len as usize
-                {
-                    let ptr =
-                        buf.as_ptr().add(offset) as *const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
-                    let info = &*ptr;
-                    if info.Relationship == RelationProcessorCore {
-                        cores += 1;
-                    }
-                    if info.Size == 0 {
-                        break;
-                    }
-                    offset += info.Size as usize;
-                }
-                if cores > 0 {
-                    cores
-                } else {
-                    logical_count
-                }
-            }
-        }
-    };
-
-    CpuTopology::from_counts(logical_count, physical_cores)
+struct CoreRecord {
+    efficiency_class: u8,
 }
 
-pub fn is_heterogeneous_cpu() -> bool {
+fn parse_processor_core_records(buf: &[u8]) -> Vec<CoreRecord> {
+    const HEADER_SIZE: usize = 8;
+    let mut records = Vec::new();
+    let mut offset = 0usize;
+    while offset + HEADER_SIZE <= buf.len() {
+        let ptr = unsafe { buf.as_ptr().add(offset) as *const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX };
+        let relationship = unsafe { std::ptr::addr_of!((*ptr).Relationship).read_unaligned() };
+        let size = unsafe { std::ptr::addr_of!((*ptr).Size).read_unaligned() as usize };
+        if size < HEADER_SIZE || offset + size > buf.len() {
+            break;
+        }
+        if relationship == RelationProcessorCore && size >= HEADER_SIZE + 2 {
+            let efficiency_class = unsafe {
+                std::ptr::addr_of!((*ptr).Anonymous.Processor.EfficiencyClass).read_unaligned()
+            };
+            records.push(CoreRecord { efficiency_class });
+        }
+        offset += size;
+    }
+    records
+}
+
+fn query_processor_core_records() -> Vec<CoreRecord> {
     unsafe {
         let mut len: u32 = 0;
         GetLogicalProcessorInformationEx(RelationProcessorCore, null_mut(), &mut len);
         if len == 0 {
-            return false;
+            return Vec::new();
         }
         let mut buf = vec![0u8; len as usize];
         let ok = GetLogicalProcessorInformationEx(
@@ -130,28 +106,38 @@ pub fn is_heterogeneous_cpu() -> bool {
             &mut len,
         );
         if ok == 0 {
-            return false;
+            return Vec::new();
         }
-        let mut offset = 0usize;
-        let mut min_class: Option<u8> = None;
-        let mut max_class: Option<u8> = None;
-        while offset + std::mem::size_of::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>()
-            <= len as usize
-        {
-            let ptr = buf.as_ptr().add(offset) as *const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
-            let info = &*ptr;
-            if info.Relationship == RelationProcessorCore {
-                let ec = info.Anonymous.Processor.EfficiencyClass;
-                min_class = Some(min_class.map_or(ec, |m| m.min(ec)));
-                max_class = Some(max_class.map_or(ec, |m| m.max(ec)));
-            }
-            if info.Size == 0 {
-                break;
-            }
-            offset += info.Size as usize;
-        }
-        matches!((min_class, max_class), (Some(lo), Some(hi)) if lo != hi)
+        parse_processor_core_records(&buf[..buf.len().min(len as usize)])
     }
+}
+
+pub fn detect_cpu_topology() -> CpuTopology {
+    let logical_count = unsafe {
+        let mut sys_info: SYSTEM_INFO = std::mem::zeroed();
+        GetSystemInfo(&mut sys_info);
+        sys_info.dwNumberOfProcessors.max(1) as usize
+    };
+
+    let records = query_processor_core_records();
+    let physical_cores = if records.is_empty() {
+        logical_count
+    } else {
+        records.len()
+    };
+
+    CpuTopology::from_counts(logical_count, physical_cores)
+}
+
+pub fn is_heterogeneous_cpu() -> bool {
+    let records = query_processor_core_records();
+    let mut min_class: Option<u8> = None;
+    let mut max_class: Option<u8> = None;
+    for r in records {
+        min_class = Some(min_class.map_or(r.efficiency_class, |m| m.min(r.efficiency_class)));
+        max_class = Some(max_class.map_or(r.efficiency_class, |m| m.max(r.efficiency_class)));
+    }
+    matches!((min_class, max_class), (Some(lo), Some(hi)) if lo != hi)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -500,7 +486,9 @@ pub fn has_visible_window_for_pids(pids: &HashSet<u32>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::CpuTopology;
+    use super::{
+        detect_cpu_topology, parse_processor_core_records, CpuTopology, RelationProcessorCore,
+    };
 
     #[test]
     fn cpu_topology_handles_smt_nosmt_hybrid_and_single_core() {
@@ -522,5 +510,34 @@ mod tests {
         let single = CpuTopology::from_counts(1, 1);
         assert!(!single.smt_enabled);
         assert_eq!(single.background_mask, 0x1);
+    }
+
+    #[test]
+    fn parse_processor_core_records_reads_all_48_byte_records_including_last_core() {
+        const RECORD_SIZE: usize = 48;
+        let mut buf = vec![0u8; RECORD_SIZE * 8];
+        for i in 0..8 {
+            let base = i * RECORD_SIZE;
+            buf[base..base + 4].copy_from_slice(&RelationProcessorCore.to_ne_bytes());
+            buf[base + 4..base + 8].copy_from_slice(&(RECORD_SIZE as u32).to_ne_bytes());
+            buf[base + 9] = if i == 7 { 1 } else { 0 };
+        }
+        let records = parse_processor_core_records(&buf);
+        assert_eq!(records.len(), 8);
+        assert_eq!(records[7].efficiency_class, 1);
+    }
+
+    #[test]
+    fn detect_cpu_topology_live_sanity() {
+        let topo = detect_cpu_topology();
+        println!(
+            "LIVE_TOPOLOGY logical={} physical={} smt={} bg=0x{:X} game=0x{:X}",
+            topo.logical_count,
+            topo.physical_cores,
+            topo.smt_enabled,
+            topo.background_mask,
+            topo.game_mask
+        );
+        assert!(topo.physical_cores >= 1 && topo.physical_cores <= topo.logical_count);
     }
 }
