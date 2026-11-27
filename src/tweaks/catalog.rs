@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use crate::sys::registry::{RegHive, RegValue};
 use crate::tweaks::advanced::{
-    ActionCenterSsoTweak, AmdShaderCacheTweak, AmdUlpsOffTweak, AudioEnhancementsTweak,
-    BcdCleanTimersTweak, CloudflareDnsTweak, ConsumerAppxTweak, DefenderGameExclusionsTweak,
+    ActionCenterSsoTweak, AmdDeepSleepAspmOffTweak, AmdShaderCacheTweak, AmdUlpsOffTweak,
+    AudioEnhancementsTweak, BcdCleanTimersTweak, CloudflareDnsTweak, ConsumerAppxTweak, DefenderGameExclusionsTweak,
     DefenderScanThrottleTweak, EdgeBackgroundTweak, EtwAutologgerTweak, FirewallOrphansTweak,
     GpuNicMsiModeTweak, HdAudioIdleOffTweak, HypervisorOffTweak, LegacyHardwareIrqTweak,
     MemoryCompressionTweak, MmAgentPrelaunchTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak,
@@ -33,7 +33,7 @@ fn sz(v: &str) -> RegValue {
 }
 
 pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
-    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(112);
+    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(115);
 
     // 1. GPU & LATÊNCIA
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -176,6 +176,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
 
     list.push(Box::new(AmdShaderCacheTweak::new()));
     list.push(Box::new(AmdUlpsOffTweak::new()));
+    list.push(Box::new(AmdDeepSleepAspmOffTweak::new()));
     list.push(Box::new(PresentMonFpsTweak::new()));
     list.push(Box::new(GpuNicMsiModeTweak::new()));
     list.push(Box::new(NvidiaTelemetryTweak::new()));
@@ -425,6 +426,21 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "DisableDeleteNotify", dw(0)),
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "RefsDisableDeleteNotify", dw(0)),
         ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "sys.bitlocker_auto_encrypt_off",
+            name: "SSD/NVMe: Impedir criptografia automática BitLocker (PreventDeviceEncryption=1)",
+            category: Category::SystemKernel,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Define Control\\BitLocker\\PreventDeviceEncryption=1 para impedir que o Windows 11 24H2/25H2 ative criptografia por software BitLocker automaticamente em unidades NVMe/SSD (que pode reduzir em 20–45% o desempenho 4K aleatório e carregamento de texturas). Nota: não descriptografa unidades já criptografadas.",
+            details: vec![],
+        },
+        vec![RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\BitLocker", "PreventDeviceEncryption", dw(1))],
+        vec![RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\BitLocker", "PreventDeviceEncryption")],
     )));
 
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -944,6 +960,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Device Metadata", "PreventDeviceMetadataFromNetwork", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization", "DODownloadMode", dw(99)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "AllowTelemetry", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection", "AllowTelemetry", dw(0)),
         ],
         vec![
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU", "NoAutoUpdate"),
@@ -957,6 +974,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Device Metadata", "PreventDeviceMetadataFromNetwork", dw(0)),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization", "DODownloadMode"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "AllowTelemetry"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection", "AllowTelemetry"),
         ],
     )));
 
@@ -1121,6 +1139,9 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "EdgeCollectionsEnabled", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "ShowRecommendationsEnabled", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "PersonalizationReportingEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "ShowMicrosoftRewards", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "SpotlightExperiencesAndRecommendationsEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "EdgeFollowEnabled", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisableTelemetry", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisableFirefoxStudies", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisablePocket", dw(1)),
@@ -1136,6 +1157,9 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "EdgeCollectionsEnabled"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "ShowRecommendationsEnabled"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "PersonalizationReportingEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "ShowMicrosoftRewards"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "SpotlightExperiencesAndRecommendationsEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "EdgeFollowEnabled"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisableTelemetry"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisableFirefoxStudies"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisablePocket"),
@@ -1214,6 +1238,37 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\privacy", "controllerconnectedservicesenabled"),
             RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\privacy", "usercontentdisabled"),
             RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\feedback", "enabled"),
+        ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "bloat.lockscreen_logon_clean",
+            name: "Políticas GPO: Desativar Acrylic no logon, Câmera/Slideshow na tela de bloqueio e AppPrivacy extra",
+            category: Category::PrivacyBloat,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Aplica políticas oficiais GPO da Microsoft para remover blur Acrylic na tela de logon, desativar câmera/slideshow na tela de bloqueio e impedir apps UWP de ler diagnóstico, histórico de chamadas, mensagens e sincronização em 2º plano (preserva câmera normal após login, microfone, Conta Microsoft, Xbox e notificações).",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "DisableAcrylicBackgroundOnLogon", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Personalization", "NoLockScreenCamera", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Personalization", "NoLockScreenSlideshow", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsAccessDiagnosticInfo", dw(2)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsSyncWithDevices", dw(2)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsAccessCallHistory", dw(2)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsAccessMessaging", dw(2)),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "DisableAcrylicBackgroundOnLogon"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Personalization", "NoLockScreenCamera"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Personalization", "NoLockScreenSlideshow"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsAccessDiagnosticInfo"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsSyncWithDevices"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsAccessCallHistory"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsAccessMessaging"),
         ],
     )));
 
@@ -1805,6 +1860,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "sys.ntfs_low_overhead",
     "sys.ntfs_memory_usage",
     "sys.storage_trim_on",
+    "sys.bitlocker_auto_encrypt_off",
     "sys.wpbt_off",
     "sys.prefetcher_off",
     "sys.defender_game_exclusions",
@@ -1841,6 +1897,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "bloat.autorun_off",
     "bloat.cli_notepad_ai_telemetry_off",
     "bloat.office_telemetry_off",
+    "bloat.lockscreen_logon_clean",
     "bloat.maintenance_background_off",
     "bloat.actioncenter_sso",
     "tasks.windows_bloat",
@@ -1865,7 +1922,7 @@ mod tests {
     #[test]
     fn catalog_ids_are_unique_and_non_empty() {
         let cat = build_catalog();
-        assert!(cat.len() >= 108);
+        assert!(cat.len() >= 111);
         validate_catalog(&cat).unwrap();
     }
 
@@ -1956,6 +2013,8 @@ mod tests {
                 assert!(!low.contains("intsteermode"), "Placebo proibido em {}", meta.id);
                 assert!(!low.contains("scanwhenassociated"), "Placebo proibido em {}", meta.id);
                 assert!(!low.contains("checksumoffload"), "Tweak toxico proibido em {}", meta.id);
+                assert!(!low.contains("coalescingtimerinterval"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("disabledmacopy"), "Placebo proibido em {}", meta.id);
                 if !low.starts_with("remover ") {
                     assert!(!low.contains("iopagelocklimit"), "Placebo proibido em {}", meta.id);
                     assert!(!low.contains("globaltimerresolutionrequests"), "Timer global proibido em {}", meta.id);

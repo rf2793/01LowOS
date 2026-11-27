@@ -7,7 +7,7 @@ use crate::ui::{badge, AppMsg, LowOsApp};
 pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.heading("Ferramentas Extras de Latência & Manutenção");
     ui.label(
-        RichText::new("Diagnóstico ao vivo e utilitários nativos sob demanda (ISLC nativo, CFG por jogo DX12, limpeza de Shaders e Temporários).")
+        RichText::new("Diagnóstico ao vivo e utilitários nativos sob demanda (ISLC nativo, CFG por jogo DX12, FSO por jogo, limpeza de Shaders e Temporários).")
             .small()
             .color(Color32::from_rgb(148, 163, 184)),
     );

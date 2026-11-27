@@ -288,6 +288,22 @@ pub fn read_gaming_health() -> Vec<HealthItem> {
     let exitlag_ok =
         svc_not_disabled("WinHttpAutoProxySvc") && svc_not_disabled("iphlpsvc") && svc_not_disabled("Wcmsvc");
     let ms_acc_ok = svc_not_disabled("TokenBroker") && svc_not_disabled("wlidsvc");
+    let trim_ok = !matches!(
+        read_value(
+            RegHive::Hklm,
+            r"SYSTEM\CurrentControlSet\Control\FileSystem",
+            "DisableDeleteNotify"
+        ),
+        Ok(Some(RegValue::DWord(1)))
+    );
+    let power_throttling_off = matches!(
+        read_value(
+            RegHive::Hklm,
+            r"SYSTEM\CurrentControlSet\Control\Power\PowerThrottling",
+            "PowerThrottlingOff"
+        ),
+        Ok(Some(RegValue::DWord(1)))
+    );
 
     vec![
         HealthItem {
@@ -304,6 +320,16 @@ pub fn read_gaming_health() -> Vec<HealthItem> {
             label: "Modo de Jogo",
             ok: game_mode,
             detail: if game_mode { "Ativo".into() } else { "Inativo".into() },
+        },
+        HealthItem {
+            label: "TRIM SSD",
+            ok: trim_ok,
+            detail: if trim_ok { "Ativo".into() } else { "Desativado".into() },
+        },
+        HealthItem {
+            label: "Power Throttling",
+            ok: power_throttling_off,
+            detail: if power_throttling_off { "Desligado".into() } else { "Padrão Win".into() },
         },
         HealthItem {
             label: "OneDrive (CldFlt)",

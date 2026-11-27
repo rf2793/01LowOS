@@ -4981,3 +4981,134 @@ impl Tweak for HypervisorOffTweak {
         Ok("hypervisorlaunchtype restaurado para auto (padrão do Windows).".into())
     }
 }
+
+pub struct AmdDeepSleepAspmOffTweak {
+    meta: TweakMeta,
+}
+
+impl AmdDeepSleepAspmOffTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "gpu.amd_deepsleep_aspm_off",
+                name: "GPU AMD: Desativar DeepSleep de Shader Clock e ASPM do driver (PP_SclkDeepSleepDisable=1, EnableAspm=0)",
+                category: Category::GpuLatency,
+                risk: RiskLevel::Medium,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Define PP_SclkDeepSleepDisable=1 e EnableAspm=0 na chave do driver AMD Radeon (VEN_1002), corrigindo quedas abruptas de clock em cenas leves e micro-engasgos (aumenta levemente consumo em idle). Marca automaticamente como N/A em PCs NVIDIA.",
+                details: vec![
+                    format!(r"HKLM\{GPU_CLASS_KEY}\00xx\PP_SclkDeepSleepDisable = 1 (VEN_1002)"),
+                    format!(r"HKLM\{GPU_CLASS_KEY}\00xx\EnableAspm = 0 (VEN_1002)"),
+                ],
+            },
+        }
+    }
+}
+
+impl Tweak for AmdDeepSleepAspmOffTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let keys = AmdUlpsOffTweak::amd_keys();
+        if keys.is_empty() {
+            return TweakStatus::NotApplicable("Nenhuma GPU AMD (VEN_1002) detectada".into());
+        }
+        let total = keys.len() * 2;
+        let mut ok = 0usize;
+        for k in &keys {
+            if matches!(
+                read_value(RegHive::Hklm, k, "PP_SclkDeepSleepDisable"),
+                Ok(Some(RegValue::DWord(1)))
+            ) {
+                ok += 1;
+            }
+            if matches!(
+                read_value(RegHive::Hklm, k, "EnableAspm"),
+                Ok(Some(RegValue::DWord(0)))
+            ) {
+                ok += 1;
+            }
+        }
+        if ok == total {
+            TweakStatus::Applied
+        } else if ok == 0 {
+            TweakStatus::NotApplied
+        } else {
+            TweakStatus::Partial(format!("{ok}/{total} ajustes"))
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let keys = AmdUlpsOffTweak::amd_keys();
+        if keys.is_empty() {
+            return Err("Nenhuma GPU AMD (VEN_1002) instalada neste PC.".into());
+        }
+        let mut snap = Vec::new();
+        for k in &keys {
+            for name in ["PP_SclkDeepSleepDisable", "EnableAspm"] {
+                let cur = read_value(RegHive::Hklm, k, name)?;
+                snap.push(RegSnapshotEntry {
+                    hive: RegHive::Hklm,
+                    subkey: k.clone(),
+                    name: name.into(),
+                    existed: cur.is_some(),
+                    value: cur,
+                    use_backup_restore: false,
+                });
+            }
+        }
+        let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        let mut modified = 0usize;
+        for k in &keys {
+            for (name, val) in [("PP_SclkDeepSleepDisable", 1u32), ("EnableAspm", 0u32)] {
+                if let Err(e) = write_value(RegHive::Hklm, k, name, &RegValue::DWord(val)) {
+                    if created && modified == 0 {
+                        let _ = backups.remove(self.meta.id);
+                    }
+                    return Err(e);
+                }
+                modified += 1;
+            }
+        }
+        Ok(format!(
+            "PP_SclkDeepSleepDisable=1 e EnableAspm=0 aplicados em {} GPU(s) AMD.",
+            keys.len()
+        ))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de DeepSleep/ASPM AMD encontrado.".into());
+        };
+        let snap: Vec<RegSnapshotEntry> =
+            serde_json::from_value(rec.data).map_err(|e| e.to_string())?;
+        for e in &snap {
+            if e.existed {
+                if let Some(v) = &e.value {
+                    write_value(e.hive, &e.subkey, &e.name, v)?;
+                }
+            } else {
+                delete_value(e.hive, &e.subkey, &e.name)?;
+            }
+        }
+        backups.remove(self.meta.id)?;
+        Ok("DeepSleep e ASPM AMD restaurados ao padrão.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        for k in AmdUlpsOffTweak::amd_keys() {
+            delete_value(RegHive::Hklm, &k, "PP_SclkDeepSleepDisable")?;
+            delete_value(RegHive::Hklm, &k, "EnableAspm")?;
+        }
+        Ok("PP_SclkDeepSleepDisable e EnableAspm removidos (padrão AMD).".into())
+    }
+}

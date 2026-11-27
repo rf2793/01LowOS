@@ -1,6 +1,8 @@
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 
+use windows_sys::Win32::Globalization::{MultiByteToWideChar, CP_OEMCP};
+
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Clone)]
@@ -33,6 +35,32 @@ fn decode_windows_output(bytes: &[u8]) -> String {
     }
     if let Ok(s) = std::str::from_utf8(bytes) {
         return s.to_string();
+    }
+    let len = unsafe {
+        MultiByteToWideChar(
+            CP_OEMCP,
+            0,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if len > 0 {
+        let mut wide = vec![0u16; len as usize];
+        let written = unsafe {
+            MultiByteToWideChar(
+                CP_OEMCP,
+                0,
+                bytes.as_ptr(),
+                bytes.len() as i32,
+                wide.as_mut_ptr(),
+                len,
+            )
+        };
+        if written > 0 {
+            return String::from_utf16_lossy(&wide[..written as usize]);
+        }
     }
     String::from_utf8_lossy(bytes).into_owned()
 }
@@ -88,4 +116,19 @@ pub fn run_powershell_checked(script: &str) -> Result<CmdOutput, String> {
         ));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_windows_output;
+
+    #[test]
+    fn decode_windows_output_handles_utf8_and_oem_bytes() {
+        assert_eq!(decode_windows_output("Ação concluída".as_bytes()), "Ação concluída");
+        // Byte 0x87 is 'ç' in CP850/CP437 and invalid UTF-8
+        let oem_sample = [b'A', 0x87, b'o'];
+        let decoded = decode_windows_output(&oem_sample);
+        assert!(!decoded.contains('\u{FFFD}'));
+        assert!(!decoded.is_empty());
+    }
 }
