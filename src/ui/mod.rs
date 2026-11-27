@@ -666,32 +666,23 @@ impl LowOsApp {
     }
 
     pub fn minimize_to_tray(&mut self, ctx: &egui::Context) {
-        let exe = match std::env::current_exe() {
-            Ok(p) => p,
-            Err(e) => {
-                self.banner = Some((false, format!("Falha ao localizar executável: {e}")));
-                return;
-            }
-        };
-
         let was_running = self.watchdog.is_running();
         if was_running {
             self.watchdog.stop();
         }
 
-        match std::process::Command::new(&exe).arg("--watchdog").spawn() {
-            Ok(_) => {
+        match crate::sys::cmd::spawn_detached_self("--watchdog") {
+            Ok(()) => {
                 self.minimized_to_tray = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                ctx.request_repaint();
             }
             Err(e) => {
                 if was_running {
                     self.watchdog.start();
                 }
-                self.banner = Some((
-                    false,
-                    format!("Falha ao iniciar Vigia na bandeja (--watchdog): {e}"),
-                ));
+                self.banner = Some((false, e.clone()));
+                self.push_session_log(format!("[Bandeja] ERRO: {e}"));
             }
         }
     }

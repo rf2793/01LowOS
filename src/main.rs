@@ -119,11 +119,7 @@ fn run_watchdog_headless() -> i32 {
         "01LowOS — Vigia + ISLC Ativo (Clique direito para abrir)",
         Arc::new(move |action| match action {
             crate::sys::tray::TrayAction::Restore => {
-                if let Ok(exe) = std::env::current_exe() {
-                    let _ = std::process::Command::new(exe)
-                        .arg("--start-watchdog")
-                        .spawn();
-                }
+                let _ = crate::sys::cmd::spawn_detached_self("--start-watchdog");
                 alive_cb.store(false, Ordering::SeqCst);
             }
             crate::sys::tray::TrayAction::Exit => {

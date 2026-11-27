@@ -1,5 +1,5 @@
 use std::os::windows::process::CommandExt;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use windows_sys::Win32::Globalization::{MultiByteToWideChar, CP_OEMCP};
 
@@ -116,6 +116,36 @@ pub fn run_powershell_checked(script: &str) -> Result<CmdOutput, String> {
         ));
     }
     Ok(out)
+}
+
+pub fn spawn_detached_self(arg: &str) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("Falha ao localizar executável: {e}"))?;
+    let spawn_path = |path: &std::path::Path| {
+        Command::new(path)
+            .arg(arg)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+    };
+
+    match spawn_path(&exe) {
+        Ok(_) => Ok(()),
+        Err(first_err) => {
+            let staged = crate::watchdog::autostart_exe_path();
+            if staged.is_file() && !staged.eq(&exe) {
+                spawn_path(&staged).map(|_| ()).map_err(|e2| {
+                    format!(
+                        "Falha ao iniciar processo ({arg}): {first_err} | fallback {}: {e2}",
+                        staged.display()
+                    )
+                })
+            } else {
+                Err(format!("Falha ao iniciar processo ({arg}): {first_err}"))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
