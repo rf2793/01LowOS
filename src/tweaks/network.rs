@@ -24,16 +24,15 @@ impl NicRssTweak {
         Self {
             meta: TweakMeta {
                 id: "net.rss_cpu2",
-                name: "Rede: RSS fora do núcleo 0 (CPU base 2, 2 filas, moderação ON)",
+                name: "Rede: RSS fora do nucleo 0 (CPU base 2, 2 CPUs, 2 filas)",
                 category: Category::Network,
                 risk: RiskLevel::Low,
                 requires_reboot: false,
                 requires_admin: true,
-                description: "Configura Receive Side Scaling dos adaptadores físicos para iniciar no CPU 2 com 2 CPUs e 2 filas (mantendo Interrupt Moderation ligada para evitar tempestade de IRQs).",
+                description: "Configura Receive Side Scaling dos adaptadores fisicos para iniciar no CPU 2 com 2 CPUs e 2 filas (PC-Tuning: para a placa de rede, o RSS base CPU basta para tirar o DPC do CPU 0). Nao mexe na Interrupt Moderation: isso fica so com net.nic_interrupt_moderation_off, sem conflito entre os dois.",
                 details: vec![
                     "Set-NetAdapterRss: Enabled=True, BaseProcessorNumber=2, MaxProcessors=2".into(),
                     "*NumRssQueues=2 (se suportado pelo driver)".into(),
-                    "*InterruptModeration=1 (ligada)".into(),
                 ],
             },
         }
@@ -118,7 +117,6 @@ foreach ($a in $rss) {
         $args2 = @{ Name=$a.Name; Enabled=$true; BaseProcessorNumber=2; MaxProcessors=2; NoRestart=$true; ErrorAction='Stop' }
         if ($q -and ($q.ValidRegistryValues -contains '2')) { $args2.NumberOfReceiveQueues = 2 }
         Set-NetAdapterRss @args2
-        if ($origMod) { Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword '*InterruptModeration' -RegistryValue 1 -NoRestart -ErrorAction Stop }
         $msgs += "$($a.Name): RSS base 2 / 2 CPUs"
     } catch {
         $err = $_.Exception.Message
@@ -160,8 +158,13 @@ foreach ($a in $rows) {{
     if ($null -ne $a.num_rss_queues) {{
         Set-NetAdapterAdvancedProperty -Name $a.name -RegistryKeyword '*NumRssQueues' -RegistryValue $a.num_rss_queues -NoRestart -ErrorAction Stop
     }}
-    if ($null -ne $a.interrupt_moderation) {{
-        Set-NetAdapterAdvancedProperty -Name $a.name -RegistryKeyword '*InterruptModeration' -RegistryValue $a.interrupt_moderation -NoRestart -ErrorAction Stop
+    # Versoes antigas deste ajuste forcavam *InterruptModeration=1. So desfaz isso se o valor ainda for 1;
+    # se net.nic_interrupt_moderation_off gravou 0 depois, o revert do RSS nao mexe na moderacao.
+    if ($null -ne $a.interrupt_moderation -and [string]$a.interrupt_moderation -ne '1') {{
+        $curMod = Get-NetAdapterAdvancedProperty -Name $a.name -RegistryKeyword '*InterruptModeration' -ErrorAction SilentlyContinue
+        if ($curMod -and [string]@($curMod.RegistryValue)[0] -eq '1') {{
+            Set-NetAdapterAdvancedProperty -Name $a.name -RegistryKeyword '*InterruptModeration' -RegistryValue $a.interrupt_moderation -NoRestart -ErrorAction Stop
+        }}
     }}
 }}
 "#
@@ -1045,7 +1048,7 @@ impl NicInterruptModerationOffTweak {
                 risk: RiskLevel::Medium,
                 requires_reboot: false,
                 requires_admin: true,
-                description: "Define *InterruptModeration=0 nos adaptadores físicos ativos (Intel I225/I226, Realtek 2.5G/5G), eliminando agrupamento de interrupções para menor jitter em FPS competitivos. Alternativo ao modo conservador do net.rss_cpu2; ideal para CPUs de 6+ núcleos.",
+                description: "Define *InterruptModeration=0 nos adaptadores fisicos ativos (Intel I225/I226, Realtek 2.5G/5G): cada pacote gera interrupcao na hora, sem agrupamento. Troca mais interrupcoes/DPC por menor atraso por pacote; sem benchmark publicado de ganho em jogo. Combina com net.rss_cpu2 (que nao mexe na moderacao); ideal para CPUs de 6+ nucleos.",
                 details: vec![
                     "Adaptadores físicos ativos: *InterruptModeration = 0".into(),
                 ],
