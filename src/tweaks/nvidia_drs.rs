@@ -38,17 +38,29 @@ const NVDRS_DWORD_TYPE: u32 = 0;
 pub const PRERENDERLIMIT_ID: u32 = 0x007B_A09E; // "Maximum pre-rendered frames" (Low Latency Mode)
 pub const PREFERRED_PSTATE_ID: u32 = 0x1057_EB71; // "Power management mode"
 pub const PS_SHADERDISKCACHE_MAX_SIZE_ID: u32 = 0x00AC_8497; // "Shader disk cache maximum size"
+pub const QUALITY_ENHANCEMENTS_ID: u32 = 0x00CE_2691; // "Texture filtering - Quality"
 // ANSEL_ENABLE_ID (0x1075D972) ficou de fora: o driver 621 (RTX 5080) responde NVAPI_NOT_SUPPORTED (-104);
 // o Ansel foi aposentado e substituido pelo modo foto do NVIDIA App.
+// "CUDA - Force P2 State" (PC-Tuning) tambem ficou de fora: nao existe no NvApiDriverSettings.h oficial,
+// so em listas nao oficiais do Profile Inspector; sem ID oficial, nao gravamos.
 
-/// (id, valor alvo, rotulo). Low Latency "On" = 1 quadro pre-renderizado; PREFER_MAX = 1;
-/// tamanho maximo do cache = PS_SHADERDISKCACHE_MAX_SIZE_MAX (0xffffffff, "Unlimited");
-/// (Ansel removido: ver comentario acima.)
-pub const TARGETS: &[(u32, u32, &str)] = &[
+/// (id, valor alvo, rotulo)
+pub type DrsTarget = (u32, u32, &'static str);
+
+/// Low Latency "On" = 1 quadro pre-renderizado; PREFER_MAX = 1;
+/// tamanho maximo do cache = PS_SHADERDISKCACHE_MAX_SIZE_MAX (0xffffffff, "Unlimited").
+pub const TARGETS: &[DrsTarget] = &[
     (PRERENDERLIMIT_ID, 1, "Low Latency Mode = On (1 quadro pre-renderizado)"),
     (PREFERRED_PSTATE_ID, 1, "Power management mode = Prefer maximum performance"),
     (PS_SHADERDISKCACHE_MAX_SIZE_ID, 0xFFFF_FFFF, "Shader Cache Size = Unlimited"),
 ];
+
+/// QUALITY_ENHANCEMENTS_HIGHPERFORMANCE = 0x14 (padrao QUALITY = 0).
+pub const TEXTURE_QUALITY_TARGETS: &[DrsTarget] = &[(
+    QUALITY_ENHANCEMENTS_ID,
+    0x14,
+    "Texture filtering - Quality = High performance",
+)];
 
 const UNICODE_STRING_MAX: usize = 2048;
 const UNION_WORDS: usize = 4100 / 4; // max(NVDRS_BINARY_SETTING = 4 + 4096, wstring 4096, u64)
@@ -248,10 +260,10 @@ pub struct ReadValue {
     pub is_predefined: bool,
 }
 
-/// Leitura somente dos 4 settings alvo no perfil global atual.
-pub fn read_targets() -> Result<Vec<(u32, Option<ReadValue>)>, String> {
+/// Leitura somente dos settings alvo no perfil global atual.
+pub fn read_targets(targets: &[DrsTarget]) -> Result<Vec<(u32, Option<ReadValue>)>, String> {
     let s = Session::open()?;
-    TARGETS.iter().map(|&(id, _, _)| s.read(id).map(|v| (id, v))).collect()
+    targets.iter().map(|&(id, _, _)| s.read(id).map(|v| (id, v))).collect()
 }
 
 /// Estado original de um setting. user_value = None: o perfil nao tinha valor do usuario
@@ -282,11 +294,37 @@ fn restore_entries(entries: &[DrsBackupEntry]) -> Result<(), String> {
 
 pub struct NvidiaDrsProfileTweak {
     meta: TweakMeta,
+    targets: &'static [DrsTarget],
+}
+
+fn details_for(targets: &[DrsTarget]) -> Vec<String> {
+    targets
+        .iter()
+        .map(|&(id, v, label)| format!("DRS 0x{id:08X} = 0x{v:X} ({label})"))
+        .collect()
 }
 
 impl NvidiaDrsProfileTweak {
+    /// Opcional e separado: troca um pouco de qualidade de filtragem de textura por desempenho.
+    pub fn texture_quality() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "gpu.nvidia_texture_filter_perf",
+                name: "GPU NVIDIA: Filtragem de textura - Qualidade = Alto desempenho",
+                category: Category::GpuLatency,
+                risk: RiskLevel::Medium,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Grava QUALITY_ENHANCEMENTS = HIGHPERFORMANCE (0x14) no perfil global do driver, como recomenda o guia PC-Tuning. Reduz a qualidade da filtragem de texturas em troca de desempenho; o padrao do driver e Quality (0). Ganho depende do jogo: o proprio guia pede benchmark. Backup e revert iguais ao ajuste de perfil NVIDIA.",
+                details: details_for(TEXTURE_QUALITY_TARGETS),
+            },
+            targets: TEXTURE_QUALITY_TARGETS,
+        }
+    }
+
     pub fn new() -> Self {
         Self {
+            targets: TARGETS,
             meta: TweakMeta {
                 id: "gpu.nvidia_profile_latency",
                 name: "GPU NVIDIA: Perfil global do driver (Low Latency On, desempenho maximo, cache de shader ilimitado)",
@@ -295,10 +333,7 @@ impl NvidiaDrsProfileTweak {
                 requires_reboot: false,
                 requires_admin: true,
                 description: "Grava no perfil global do driver (o mesmo de Painel de Controle NVIDIA > Configuracoes globais) os valores do guia PC-Tuning: Low Latency Mode On (1 quadro pre-renderizado; jogos com NVIDIA Reflex ignoram), Power management mode = Prefer maximum performance, Shader Cache Size = Unlimited. (Ansel nao entra: drivers atuais nao suportam mais o setting.) Usa a NVAPI oficial carregada de System32; nada e injetado em jogos. Backup dos valores originais; o revert volta cada um ao valor anterior ou ao padrao do driver.",
-                details: TARGETS
-                    .iter()
-                    .map(|&(id, v, label)| format!("DRS 0x{id:08X} = 0x{v:X} ({label})"))
-                    .collect(),
+                details: details_for(TARGETS),
             },
         }
     }
@@ -313,25 +348,25 @@ impl Tweak for NvidiaDrsProfileTweak {
         if let Err(e) = api() {
             return TweakStatus::NotApplicable(e);
         }
-        let values = match read_targets() {
+        let values = match read_targets(self.targets) {
             Ok(v) => v,
             Err(e) => return TweakStatus::Error(e),
         };
         let ok = values
             .iter()
-            .zip(TARGETS)
+            .zip(self.targets)
             .filter(|((_, read), &(_, target, _))| read.map(|r| r.value) == Some(target))
             .count();
         match ok {
-            n if n == TARGETS.len() => TweakStatus::Applied,
+            n if n == self.targets.len() => TweakStatus::Applied,
             0 => TweakStatus::NotApplied,
-            n => TweakStatus::Partial(format!("{n}/{} settings", TARGETS.len())),
+            n => TweakStatus::Partial(format!("{n}/{} settings", self.targets.len())),
         }
     }
 
     fn apply(&self, backups: &BackupStore) -> Result<String, String> {
         api()?;
-        let before = read_targets()?;
+        let before = read_targets(self.targets)?;
         let snapshot: Vec<DrsBackupEntry> =
             before.iter().map(|&(id, read)| snapshot_entry(id, read)).collect();
         let json = serde_json::to_value(&snapshot).map_err(|e| e.to_string())?;
@@ -339,13 +374,13 @@ impl Tweak for NvidiaDrsProfileTweak {
 
         let result = (|| -> Result<(), String> {
             let s = Session::open()?;
-            for &(id, value, _) in TARGETS {
+            for &(id, value, _) in self.targets {
                 s.write(id, value)?;
             }
             s.save()?;
             drop(s);
             // Confere relendo numa sessao nova: o valor gravado tem que ser o lido do driver.
-            for ((id, read), &(_, target, label)) in read_targets()?.iter().zip(TARGETS) {
+            for ((id, read), &(_, target, label)) in read_targets(self.targets)?.iter().zip(self.targets) {
                 if read.map(|r| r.value) != Some(target) {
                     return Err(format!("Driver nao confirmou 0x{id:08X} ({label})"));
                 }
@@ -354,7 +389,7 @@ impl Tweak for NvidiaDrsProfileTweak {
         })();
 
         match result {
-            Ok(()) => Ok(format!("{} settings gravados no perfil global NVIDIA.", TARGETS.len())),
+            Ok(()) => Ok(format!("{} settings gravados no perfil global NVIDIA.", self.targets.len())),
             Err(e) => {
                 let rb = restore_entries(&snapshot);
                 if created && rb.is_ok() {
@@ -384,7 +419,7 @@ impl Tweak for NvidiaDrsProfileTweak {
     }
 
     fn reset_to_default(&self) -> Result<String, String> {
-        let entries: Vec<DrsBackupEntry> = TARGETS
+        let entries: Vec<DrsBackupEntry> = self.targets
             .iter()
             .map(|&(id, _, _)| DrsBackupEntry { id, user_value: None })
             .collect();
@@ -424,6 +459,7 @@ mod tests {
         assert_eq!(TARGETS[0].1, 1); // PRERENDERLIMIT = 1
         assert_eq!(TARGETS[1].1, 1); // PREFERRED_PSTATE_PREFER_MAX
         assert_eq!(TARGETS[2].1, 0xFFFF_FFFF); // PS_SHADERDISKCACHE_MAX_SIZE_MAX
+        assert_eq!(TEXTURE_QUALITY_TARGETS, &[(QUALITY_ENHANCEMENTS_ID, 0x14, TEXTURE_QUALITY_TARGETS[0].2)]);
     }
 
     /// Grava e rele na MESMA sessao sem SaveSettings: valida SetSetting/estrutura no driver real
@@ -432,7 +468,7 @@ mod tests {
     #[ignore]
     fn drs_write_roundtrip_without_save() {
         let s = Session::open().expect("sessao DRS");
-        for &(id, value, label) in TARGETS {
+        for &(id, value, label) in TARGETS.iter().chain(TEXTURE_QUALITY_TARGETS) {
             s.write(id, value).expect(label);
             let back = s.read(id).expect("releitura").expect("valor presente");
             assert_eq!(back.value, value, "{label}");
@@ -443,7 +479,7 @@ mod tests {
 
     #[test]
     fn live_read_only_probe_of_global_profile() {
-        match read_targets() {
+        match read_targets(&[TARGETS, TEXTURE_QUALITY_TARGETS].concat()) {
             Ok(values) => {
                 for (id, v) in values {
                     println!("0x{id:08X} -> {v:?}");

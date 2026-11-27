@@ -186,6 +186,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(NvidiaDynamicPstateTweak::new()));
     list.push(Box::new(NvidiaHdcpOffTweak::new()));
     list.push(Box::new(NvidiaDrsProfileTweak::new()));
+    list.push(Box::new(NvidiaDrsProfileTweak::texture_quality()));
     list.push(Box::new(AudioEnhancementsTweak::new()));
 
     // 2. SISTEMA & KERNEL
