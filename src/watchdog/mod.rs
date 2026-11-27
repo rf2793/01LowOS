@@ -500,7 +500,7 @@ impl WatchdogEngine {
         if !self.acquire_instance() {
             push_log(
                 &self.snapshot,
-                "Outro vigia já está ativo nesta sessão (bandeja/tarefa de logon); este não foi iniciado.".into(),
+                "Outro vigia ja esta ativo nesta sessao (bandeja/tarefa de logon); este nao foi iniciado.".into(),
             );
             return;
         }

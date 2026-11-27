@@ -517,6 +517,31 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     )));
 
     list.push(Box::new(SmartScreenAclTweak::new()));
+
+    // Complemento do SmartScreen OFF (decisao do usuario, 20/10/2026): Protecao Avancada contra
+    // Phishing (politica oficial WebThreatDefense/ServiceEnabled, Policy CSP no Microsoft Learn) e
+    // SmartScreen de conteudo web dos apps da Store (interruptor do Windows Security).
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "sys.phishing_store_smartscreen_off",
+            name: "SmartScreen: Desativar Protecao Avancada contra Phishing e verificacao de apps da Store",
+            category: Category::SystemKernel,
+            risk: RiskLevel::Medium,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Politica WTDS\\Components ServiceEnabled=0 (Policy CSP WebThreatDefense, desliga a captura de digitacao de senha do Enhanced Phishing Protection) e AppHost EnableWebContentEvaluation=0 (SmartScreen de URLs usadas por apps da Store). Complementa sys.smartscreen_off; reduz a protecao contra phishing.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WTDS\Components", "ServiceEnabled", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\AppHost", "EnableWebContentEvaluation", dw(0)),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WTDS\Components", "ServiceEnabled"),
+            RegOp::delete(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\AppHost", "EnableWebContentEvaluation"),
+        ],
+    )));
+
     list.push(Box::new(DefenderGameExclusionsTweak::new()));
     list.push(Box::new(DefenderScanThrottleTweak::new()));
     list.push(Box::new(ReservedStorageOffTweak::new()));
@@ -1224,6 +1249,29 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         ],
     )));
 
+    // Policy CSP TextInput/AllowLinguisticDataCollection (Microsoft Learn) + Configuracoes >
+    // Digitacao > "Insights de digitacao" (HKCU input\Settings). Coleta sem utilidade para jogar.
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "bloat.typing_data_off",
+            name: "Privacidade: Sem envio de dados de digitacao/tinta e sem Insights de digitacao",
+            category: Category::PrivacyBloat,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Politica AllowLinguisticDataCollection=0 (nao envia amostras de digitacao e tinta para melhorar o reconhecimento) e InsightsEnabled=0 (desliga as estatisticas de digitacao do teclado virtual/sugestoes).",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\TextInput", "AllowLinguisticDataCollection", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\input\Settings", "InsightsEnabled", dw(0)),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\TextInput", "AllowLinguisticDataCollection"),
+            RegOp::delete(RegHive::Hkcu, r"Software\Microsoft\input\Settings", "InsightsEnabled"),
+        ],
+    )));
+
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "bloat.office_telemetry_off",
@@ -1517,6 +1565,26 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             details: vec![],
         },
         vec![ServiceTarget::disable("GameInputSvc")],
+    )));
+
+    // Mesma decisao da ISO (Perfil_01LowOS.ps1 / Aplicar_PosOOBE.ps1, testado no PC em 20/10/2026).
+    // Servicos ausentes (ex.: Defender ja removido) ficam N/A pelo proprio ServiceGroupTweak.
+    list.push(Box::new(ServiceGroupTweak::new(
+        TweakMeta {
+            id: "svc.gamedvr_webthreat_off",
+            name: "Servicos: Transmissao GameDVR (BcastDVRUserService) e Web Threat Defense",
+            category: Category::WindowsServices,
+            risk: RiskLevel::Low,
+            requires_reboot: true,
+            requires_admin: true,
+            description: "Desativa o servico por usuario de captura/transmissao do GameDVR (sem uso com GameDVR desligado em gpu.game_mode) e os servicos Web Threat Defense da Protecao Avancada contra Phishing (sem uso com SmartScreen desligado).",
+            details: vec![],
+        },
+        vec![
+            ServiceTarget::disable("BcastDVRUserService"),
+            ServiceTarget::disable("webthreatdefsvc"),
+            ServiceTarget::disable("webthreatdefusersvc"),
+        ],
     )));
 
     list.push(Box::new(ServiceGroupTweak::new(
@@ -1904,6 +1972,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "bloat.browsers_bg_telemetry_off",
     "bloat.autorun_off",
     "bloat.cli_notepad_ai_telemetry_off",
+    "bloat.typing_data_off",
     "bloat.office_telemetry_off",
     "bloat.lockscreen_logon_clean",
     "bloat.maintenance_background_off",
