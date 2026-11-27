@@ -78,11 +78,13 @@ pub enum AppMsg {
     },
     CfgListLoaded(Vec<String>),
     ShaderScanLoaded(Vec<crate::tools::ShaderCacheDir>),
+    TempScanLoaded(Vec<crate::tools::ShaderCacheDir>),
     ToolBusyDone {
         ok: bool,
         text: String,
         refresh_cfg: bool,
         refresh_shaders: bool,
+        refresh_temp: bool,
     },
     RestoredFromTray,
     QuitFromTray,
@@ -136,8 +138,10 @@ pub struct LowOsApp {
     pub cfg_exe_input: String,
     pub cfg_disabled_list: Vec<String>,
     pub shader_dirs: Vec<crate::tools::ShaderCacheDir>,
+    pub temp_dirs: Vec<crate::tools::ShaderCacheDir>,
     pub tools_busy: bool,
     pub confirm_clean_shaders: bool,
+    pub confirm_clean_temp: bool,
 
     pub tx: Sender<AppMsg>,
     pub rx: Receiver<AppMsg>,
@@ -216,8 +220,10 @@ impl LowOsApp {
             cfg_exe_input: String::new(),
             cfg_disabled_list: Vec::new(),
             shader_dirs: crate::tools::scan_shader_caches(),
+            temp_dirs: crate::tools::scan_temp_caches(),
             tools_busy: false,
             confirm_clean_shaders: false,
+            confirm_clean_temp: false,
             tx,
             rx,
         };
@@ -448,6 +454,16 @@ impl LowOsApp {
         });
     }
 
+    pub fn trigger_scan_temp(&self, ctx: &egui::Context) {
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let list = crate::tools::scan_temp_caches();
+            let _ = tx.send(AppMsg::TempScanLoaded(list));
+            ctx.request_repaint();
+        });
+    }
+
     pub fn trigger_check_apps(&self, ctx: &egui::Context) {
         let apps = self.apps.clone();
         let tx = self.tx.clone();
@@ -616,11 +632,15 @@ impl LowOsApp {
                 AppMsg::ShaderScanLoaded(list) => {
                     self.shader_dirs = list;
                 }
+                AppMsg::TempScanLoaded(list) => {
+                    self.temp_dirs = list;
+                }
                 AppMsg::ToolBusyDone {
                     ok,
                     text,
                     refresh_cfg,
                     refresh_shaders,
+                    refresh_temp,
                 } => {
                     self.tools_busy = false;
                     self.banner = Some((ok, text.clone()));
@@ -630,6 +650,9 @@ impl LowOsApp {
                     }
                     if refresh_shaders {
                         self.trigger_scan_shaders(ctx);
+                    }
+                    if refresh_temp {
+                        self.trigger_scan_temp(ctx);
                     }
                 }
                 AppMsg::RestoredFromTray => {

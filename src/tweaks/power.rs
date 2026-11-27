@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -407,5 +408,91 @@ impl Tweak for DeviceWakeTweak {
         } else {
             Err(errs.join("; "))
         }
+    }
+}
+
+pub struct HiberfilOffTweak {
+    meta: TweakMeta,
+}
+
+impl HiberfilOffTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "power.hiberfil_off",
+                name: "Hibernação: Remover hiberfil.sys via powercfg /h off (libera 12–24 GB no SSD)",
+                category: Category::Power,
+                risk: RiskLevel::Low,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Executa powercfg /h off para remover definitivamente o arquivo C:\\hiberfil.sys (economizando 12–24 GB no SSD/NVMe) e garantir boot frio limpo. Atenção: o modo Hibernar fica indisponível até reverter (powercfg /h on).",
+                details: vec![
+                    r"powercfg.exe /h off (remove %SystemDrive%\hiberfil.sys)".into(),
+                    "Reversão: powercfg.exe /h on".into(),
+                ],
+            },
+        }
+    }
+
+    fn hiberfil_path() -> PathBuf {
+        let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+        PathBuf::from(format!(r"{drive}\hiberfil.sys"))
+    }
+}
+
+impl Tweak for HiberfilOffTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let exists = Self::hiberfil_path().exists();
+        let enabled = matches!(
+            read_value(
+                RegHive::Hklm,
+                r"SYSTEM\CurrentControlSet\Control\Power",
+                "HibernateEnabled"
+            ),
+            Ok(Some(RegValue::DWord(1)))
+        );
+        if !exists && !enabled {
+            TweakStatus::Applied
+        } else {
+            TweakStatus::NotApplied
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let existed = Self::hiberfil_path().exists();
+        let json = serde_json::json!({ "existed": existed });
+        let created = backups.save_if_absent(self.meta.id, json)?;
+        if let Err(e) = run_hidden_checked("powercfg.exe", &["/h", "off"], &[0]) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
+        Ok("Hibernação desativada e hiberfil.sys removido (powercfg /h off).".into())
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de hibernação encontrado.".into());
+        };
+        let existed = rec.data["existed"].as_bool().unwrap_or(true);
+        if existed {
+            run_hidden_checked("powercfg.exe", &["/h", "on"], &[0])?;
+        }
+        backups.remove(self.meta.id)?;
+        Ok("Hibernação restaurada ao estado original.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        run_hidden_checked("powercfg.exe", &["/h", "on"], &[0])?;
+        Ok("Hibernação reativada (powercfg /h on).".into())
     }
 }

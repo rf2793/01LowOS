@@ -6,15 +6,16 @@ use crate::tweaks::advanced::{
     BcdCleanTimersTweak, CloudflareDnsTweak, ConsumerAppxTweak, DefenderGameExclusionsTweak,
     EdgeBackgroundTweak, EtwAutologgerTweak, FirewallOrphansTweak, GpuNicMsiModeTweak,
     LegacyHardwareIrqTweak, MemoryCompressionTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak,
-    NvidiaHdcpOffTweak, NvidiaTelemetryTweak, OptionalFeaturesTweak, PnpUnusedDevicesTweak,
-    PresentMonFpsTweak, SmartScreenAclTweak, SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak,
-    UsbAudioMsiModeTweak, UsbD3SuspendTweak, UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
+    NvidiaHdcpOffTweak, NvidiaTelemetryTweak, NvmeStorageMsiTweak, OptionalFeaturesTweak,
+    PnpUnusedDevicesTweak, PresentMonFpsTweak, SmartScreenAclTweak, SystemAppxTweak,
+    TcpNagleTweak, ThirdPartyBloatTweak, UsbAudioMsiModeTweak, UsbD3SuspendTweak,
+    UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
 };
 use crate::tweaks::network::{
-    NetQosNicFlowTweak, NetRscUdpLatencyTweak, NicBindingsTweak, NicRssTweak, NicWolEeeTweak,
-    WinInetWpadTweak,
+    NetQosNicFlowTweak, NetRscUdpLatencyTweak, NetTcpBbr2Tweak, NicBindingsTweak,
+    NicInterruptModerationOffTweak, NicRssTweak, NicWolEeeTweak, WinInetWpadTweak,
 };
-use crate::tweaks::power::{DeviceWakeTweak, PowerPlanTweak};
+use crate::tweaks::power::{DeviceWakeTweak, HiberfilOffTweak, PowerPlanTweak};
 use crate::tweaks::registry_tweak::{RegOp, RegistryTweak};
 use crate::tweaks::service_tweak::{ServiceGroupTweak, ServiceTarget};
 use crate::tweaks::task_tweak::{ScheduledTaskGroupTweak, TaskPattern};
@@ -28,7 +29,7 @@ fn sz(v: &str) -> RegValue {
 }
 
 pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
-    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(84);
+    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(90);
 
     // 1. GPU & LATÊNCIA
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -207,6 +208,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(LegacyHardwareIrqTweak::new()));
     list.push(Box::new(BcdCleanTimersTweak::new()));
     list.push(Box::new(UsbAudioMsiModeTweak::new()));
+    list.push(Box::new(NvmeStorageMsiTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
@@ -290,6 +292,29 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         },
         vec![RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\FTH", "Enabled", dw(0))],
         vec![RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\FTH", "Enabled", dw(1))],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "sys.crash_rsop_clean",
+            name: "Sistema: Desativar AutoReboot, RSoP logging e ClearPageFileAtShutdown",
+            category: Category::SystemKernel,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Define CrashDumpEnabled=3 (minidump), AutoReboot=0, RSoPLogging=0 e ClearPageFileAtShutdown=0, evitando overhead de políticas RSoP em segundo plano e desligamentos lentos.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\CrashControl", "CrashDumpEnabled", dw(3)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\CrashControl", "AutoReboot", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "RSoPLogging", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "ClearPageFileAtShutdown", dw(0)),
+        ],
+        vec![
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\CrashControl", "AutoReboot", dw(1)),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "RSoPLogging"),
+        ],
     )));
 
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -455,6 +480,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
 
     // 3. ENERGIA
     list.push(Box::new(PowerPlanTweak::new()));
+    list.push(Box::new(HiberfilOffTweak::new()));
     list.push(Box::new(DeviceWakeTweak::new()));
     list.push(Box::new(UsbDevicePowerMgmtTweak::new()));
     list.push(Box::new(UsbHubPowerMgmtTweak::new()));
@@ -468,6 +494,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(TcpNagleTweak::new()));
     list.push(Box::new(NetRscUdpLatencyTweak::new()));
     list.push(Box::new(NetQosNicFlowTweak::new()));
+    list.push(Box::new(NicInterruptModerationOffTweak::new()));
+    list.push(Box::new(NetTcpBbr2Tweak::new()));
     list.push(Box::new(CloudflareDnsTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -774,17 +802,26 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot", dw(1)),
             RegOp::set(RegHive::Hkcu, r"Software\Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "DisableAIDataAnalysis", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "DisableRecall", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "AllowRecallEnablement", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "TurnOffSavingSnapshots", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "DisableClickToDo", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Policies\Microsoft\Windows\CloudContent", "DisableWindowsSpotlightFeatures", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Policies\Microsoft\Windows\CloudContent", "DisableTailoredExperiencesWithDiagnosticData", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Paint", "DisableAIImageGeneration", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Paint", "DisableCocreator", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Paint", "DisableGenerativeFill", dw(1)),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Dsh", "AllowNewsAndInterests", dw(0)),
             RegOp::set_opt(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "TaskbarDa", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Policies\Microsoft\Windows\Explorer", "DisableSearchBoxSuggestions", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "AllowCortana", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "AllowCloudSearch", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "DisableWebSearch", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "DisableWebViewSearch", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "ConnectedSearchUseWeb", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "DisableSearch", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer", "AllowOnlineTips", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "DisableDiagnosticDataViewer", dw(1)),
         ],
         vec![
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Personalization", "NoLockScreen"),
@@ -794,17 +831,26 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot"),
             RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "DisableAIDataAnalysis"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "DisableRecall"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "AllowRecallEnablement"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "TurnOffSavingSnapshots"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "DisableClickToDo"),
+            RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\Windows\CloudContent", "DisableWindowsSpotlightFeatures"),
+            RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\Windows\CloudContent", "DisableTailoredExperiencesWithDiagnosticData"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Paint", "DisableAIImageGeneration"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Paint", "DisableCocreator"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Paint", "DisableGenerativeFill"),
             RegOp::delete_opt(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Dsh", "AllowNewsAndInterests"),
             RegOp::set_opt(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "TaskbarDa", dw(1)),
+            RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\Windows\Explorer", "DisableSearchBoxSuggestions"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "AllowCortana"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "AllowCloudSearch"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "DisableWebSearch"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "DisableWebViewSearch"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "ConnectedSearchUseWeb"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "DisableSearch"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer", "AllowOnlineTips"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "DisableDiagnosticDataViewer"),
         ],
     )));
 
@@ -1337,10 +1383,12 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "sys.legacy_cleanup_irq",
     "sys.bcd_clean_timers",
     "sys.msi_mode_usb_audio",
+    "sys.nvme_storage_msi",
     "sys.fast_startup_off",
     "sys.memory_compression_off",
     "sys.vbs_hvci_off",
     "sys.fth_off",
+    "sys.crash_rsop_clean",
     "sys.power_throttling_off",
     "sys.win32_priority_separation",
     "sys.ntfs_low_overhead",
@@ -1349,6 +1397,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "sys.defender_game_exclusions",
     "sys.ifeo_touch_voice_off",
     "power.plan_01lowos",
+    "power.hiberfil_off",
     "power.device_wake_off",
     "power.usb_device_pm_off",
     "power.usb_hub_pm_off",
@@ -1420,12 +1469,25 @@ mod tests {
         let cat = build_catalog();
         for t in &cat {
             let meta = t.meta();
+            assert!(!meta.id.is_empty() && !meta.name.is_empty() && !meta.description.is_empty());
+            assert!(!meta.details.is_empty(), "Sem detalhes em {}", meta.id);
             for detail in &meta.details {
                 let low = detail.to_ascii_lowercase();
                 assert!(!low.contains("disabledynamictick"), "Tweak proibido em {}", meta.id);
                 assert!(!low.contains("tscsyncpolicy"), "Tweak proibido em {}", meta.id);
                 assert!(!low.contains("useplatformclock"), "Tweak proibido em {}", meta.id);
                 assert!(!low.contains("appinit_dlls"), "Tweak proibido em {}", meta.id);
+                assert!(!low.contains("bioenrollment"), "BioEnrollment quebra Windows Hello! {}", meta.id);
+                assert!(!low.contains("disablepagingexecutive"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("largesystemcache"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("enablepreemption"), "Tweak instável proibido em {}", meta.id);
+                assert!(!low.contains("rmdisablepostl2compression"), "Tweak instável proibido em {}", meta.id);
+                assert!(!low.contains("maximumdpcqueuedepth"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("svchostsplitthresholdinkb"), "SvcHost collapse proibido em {}", meta.id);
+                if !low.starts_with("remover ") {
+                    assert!(!low.contains("iopagelocklimit"), "Placebo proibido em {}", meta.id);
+                    assert!(!low.contains("globaltimerresolutionrequests"), "Timer global proibido em {}", meta.id);
+                }
                 assert!(!low.contains("wpnservice: disabled"), "WpnService deve ficar mantido! {}", meta.id);
                 assert!(!low.contains("wpnuserservice: disabled"), "WpnUserService deve ficar mantido! {}", meta.id);
                 assert!(!low.contains("camsvc: disabled"), "camsvc deve ficar mantido! {}", meta.id);
@@ -1475,6 +1537,12 @@ mod tests {
             assert!(
                 ids.contains(preset_id),
                 "ID do Preset Jogos Seguro ausente no catálogo: {preset_id}"
+            );
+            let tw = cat.iter().find(|t| t.meta().id == preset_id).unwrap();
+            assert_ne!(
+                tw.meta().risk,
+                RiskLevel::High,
+                "Tweak de risco Alto não pode estar no Preset Seguro: {preset_id}"
             );
         }
     }

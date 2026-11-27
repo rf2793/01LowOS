@@ -591,7 +591,6 @@ const SYSTEM_APPX_LIST: &[&str] = &[
     "Microsoft.Windows.PeopleExperienceHost",
     "Microsoft.Windows.NarratorQuickStart",
     "Microsoft.Windows.AssignedAccessLockApp",
-    "Microsoft.BioEnrollment",
     "Microsoft.Windows.Apprep.ChxApp",
     "Microsoft.SecHealthUI",
     "Microsoft.Windows.ContentDeliveryManager",
@@ -624,12 +623,12 @@ impl SystemAppxTweak {
         Self {
             meta: TweakMeta {
                 id: "bloat.system_appx",
-                name: "Desprovisionar 22 pacotes AppX de sistema sem uso para jogos",
+                name: "Desprovisionar 21 pacotes AppX de sistema sem uso para jogos",
                 category: Category::PrivacyBloat,
                 risk: RiskLevel::Medium,
                 requires_reboot: false,
                 requires_admin: true,
-                description: "Marca EndOfLife/Deprovisioned e remove para todos os usuários os 22 pacotes SystemApps não essenciais (preserva shell, OOBE, captura de tela, XboxGameCallableUI e TextInputHost).",
+                description: "Marca EndOfLife/Deprovisioned e remove para todos os usuários os 21 pacotes SystemApps não essenciais (preserva shell, OOBE, BioEnrollment/Windows Hello, captura de tela, XboxGameCallableUI e TextInputHost).",
                 details: SYSTEM_APPX_LIST
                     .iter()
                     .map(|n| format!("AppX: {n}"))
@@ -719,7 +718,7 @@ if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
         let rows: Vec<AppxBackupEntry> =
             serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
         if rows.is_empty() {
-            return Ok("Nenhum dos 22 pacotes AppX alvo está instalado.".into());
+            return Ok("Nenhum dos 21 pacotes AppX alvo está instalado.".into());
         }
         let json = serde_json::to_value(&rows).map_err(|e| e.to_string())?;
         let created = backups.save_if_absent(self.meta.id, json)?;
@@ -2074,7 +2073,7 @@ if ($null -ne $snap.svc_start) {{
 }}
 foreach ($t in @($snap.tasks)) {{
     if (-not $t.TaskName) {{ continue }}
-    Disable-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction Stop | Out-Null
+    try {{ Disable-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction Stop | Out-Null }} catch {{}}
 }}
 $regKey = 'HKLM:\SOFTWARE\NVIDIA Corporation\NvControlPanel2\Client'
 if ($snap.has_nv) {{
@@ -2265,7 +2264,7 @@ impl TcpNagleTweak {
         Self {
             meta: TweakMeta {
                 id: "net.tcp_nagle_off",
-                name: "Rede: Desativar algoritmo de Nagle (TcpAckFrequency=1, TCPNoDelay=1)",
+                name: "Rede: Desativar algoritmo de Nagle (TcpAckFrequency=1, TCPNoDelay=1, TcpDelAckTicks=0)",
                 category: Category::Network,
                 risk: RiskLevel::Low,
                 requires_reboot: true,
@@ -2274,6 +2273,7 @@ impl TcpNagleTweak {
                 details: vec![
                     format!(r"HKLM\{TCPIP_IFACES_KEY}\{{GUID}}\TcpAckFrequency = 1"),
                     format!(r"HKLM\{TCPIP_IFACES_KEY}\{{GUID}}\TCPNoDelay = 1"),
+                    format!(r"HKLM\{TCPIP_IFACES_KEY}\{{GUID}}\TcpDelAckTicks = 0"),
                 ],
             },
         }
@@ -2313,13 +2313,16 @@ impl Tweak for TcpNagleTweak {
         if ifaces.is_empty() {
             return TweakStatus::NotApplicable("Nenhuma interface TCP/IP ativa encontrada".into());
         }
-        let total = ifaces.len() * 2;
+        let total = ifaces.len() * 3;
         let mut ok = 0usize;
         for sk in &ifaces {
             for val in ["TcpAckFrequency", "TCPNoDelay"] {
                 if matches!(read_value(RegHive::Hklm, sk, val), Ok(Some(RegValue::DWord(1)))) {
                     ok += 1;
                 }
+            }
+            if matches!(read_value(RegHive::Hklm, sk, "TcpDelAckTicks"), Ok(Some(RegValue::DWord(0)))) {
+                ok += 1;
             }
         }
         if ok == total {
@@ -2338,7 +2341,7 @@ impl Tweak for TcpNagleTweak {
         }
         let mut snap = Vec::new();
         for sk in &ifaces {
-            for val_name in ["TcpAckFrequency", "TCPNoDelay"] {
+            for val_name in ["TcpAckFrequency", "TCPNoDelay", "TcpDelAckTicks"] {
                 let cur = read_value(RegHive::Hklm, sk, val_name)?;
                 snap.push(RegSnapshotEntry {
                     hive: RegHive::Hklm,
@@ -2355,8 +2358,14 @@ impl Tweak for TcpNagleTweak {
 
         let mut modified = 0usize;
         for sk in &ifaces {
-            for val_name in ["TcpAckFrequency", "TCPNoDelay"] {
-                if let Err(e) = write_value(RegHive::Hklm, sk, val_name, &RegValue::DWord(1)) {
+            for (val_name, target_dw) in [
+                ("TcpAckFrequency", 1),
+                ("TCPNoDelay", 1),
+                ("TcpDelAckTicks", 0),
+            ] {
+                if let Err(e) =
+                    write_value(RegHive::Hklm, sk, val_name, &RegValue::DWord(target_dw))
+                {
                     if created && modified == 0 {
                         let _ = backups.remove(self.meta.id);
                     }
@@ -2398,8 +2407,9 @@ impl Tweak for TcpNagleTweak {
         for sk in Self::active_interfaces() {
             delete_value(RegHive::Hklm, &sk, "TcpAckFrequency")?;
             delete_value(RegHive::Hklm, &sk, "TCPNoDelay")?;
+            delete_value(RegHive::Hklm, &sk, "TcpDelAckTicks")?;
         }
-        Ok("TcpAckFrequency e TCPNoDelay removidos (padrão do Windows).".into())
+        Ok("TcpAckFrequency, TCPNoDelay e TcpDelAckTicks removidos (padrão do Windows).".into())
     }
 }
 
@@ -3958,7 +3968,9 @@ impl AmdUlpsOffTweak {
             if let Ok(Some(RegValue::String(id))) =
                 read_value(RegHive::Hklm, &dev_key, "MatchingDeviceId")
             {
-                if id.to_ascii_uppercase().contains("VEN_1002") {
+                let has_driver = key_exists(RegHive::Hklm, &format!(r"{dev_key}\UMD"))
+                    || matches!(read_value(RegHive::Hklm, &dev_key, "EnableUlps"), Ok(Some(_)));
+                if id.to_ascii_uppercase().contains("VEN_1002") && has_driver {
                     res.push(dev_key);
                 }
             }
@@ -4164,5 +4176,134 @@ impl Tweak for BcdCleanTimersTweak {
         }
         backups.remove(self.meta.id)?;
         Ok(format!("{} flag(s) BCD restaurada(s).", flags.len()))
+    }
+}
+
+const STORAGE_MSI_CLASSES: &[&str] = &[
+    "{4d36e97b-e325-11ce-bfc1-08002be10318}",
+    "{4d36e96a-e325-11ce-bfc1-08002be10318}",
+];
+
+pub struct NvmeStorageMsiTweak {
+    meta: TweakMeta,
+}
+
+impl NvmeStorageMsiTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "sys.nvme_storage_msi",
+                name: "Armazenamento: Ativar MSI Mode em controladores NVMe e SATA AHCI",
+                category: Category::SystemKernel,
+                risk: RiskLevel::Low,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Garante MSISupported=1 em controladores PCI de armazenamento NVMe (SCSIAdapter) e SATA AHCI (HDC) que expõem suporte MSI, evitando compartilhamento de IRQ legada durante carregamento de texturas/assets.",
+                details: vec![
+                    r"Escaneia Enum\PCI\*\* para classes SCSIAdapter (NVMe) e HDC (AHCI)".into(),
+                    "Define MessageSignaledInterruptProperties\\MSISupported = 1".into(),
+                ],
+            },
+        }
+    }
+
+    fn scan_targets() -> Vec<String> {
+        let mut out = Vec::new();
+        for vendor in list_subkeys(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Enum\PCI") {
+            let v_path = format!(r"SYSTEM\CurrentControlSet\Enum\PCI\{vendor}");
+            for device in list_subkeys(RegHive::Hklm, &v_path) {
+                let dev_path = format!(r"{v_path}\{device}");
+                let class_guid = match read_value(RegHive::Hklm, &dev_path, "ClassGUID") {
+                    Ok(Some(RegValue::String(s))) => s.to_ascii_lowercase(),
+                    _ => continue,
+                };
+                if !STORAGE_MSI_CLASSES.contains(&class_guid.as_str()) {
+                    continue;
+                }
+                let msi_path = format!(
+                    r"{dev_path}\Device Parameters\Interrupt Management\MessageSignaledInterruptProperties"
+                );
+                if key_exists(RegHive::Hklm, &msi_path) {
+                    out.push(msi_path);
+                }
+            }
+        }
+        out
+    }
+}
+
+impl Tweak for NvmeStorageMsiTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let targets = Self::scan_targets();
+        if targets.is_empty() {
+            return TweakStatus::NotApplicable("Nenhum controlador NVMe/AHCI com chave MSI".into());
+        }
+        let ok = targets
+            .iter()
+            .filter(|sk| matches!(read_value(RegHive::Hklm, sk, "MSISupported"), Ok(Some(RegValue::DWord(1)))))
+            .count();
+        if ok == targets.len() {
+            TweakStatus::Applied
+        } else if ok == 0 {
+            TweakStatus::NotApplied
+        } else {
+            TweakStatus::Partial(format!("{ok}/{} controladores", targets.len()))
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let targets = Self::scan_targets();
+        if targets.is_empty() {
+            return Ok("Nenhum controlador NVMe/AHCI compatível encontrado.".into());
+        }
+        let mut snap = Vec::new();
+        for sk in &targets {
+            let cur = read_value(RegHive::Hklm, sk, "MSISupported")?;
+            snap.push(RegSnapshotEntry {
+                hive: RegHive::Hklm,
+                subkey: sk.clone(),
+                name: "MSISupported".into(),
+                existed: cur.is_some(),
+                value: cur,
+                use_backup_restore: true,
+            });
+        }
+        let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        for (modified, sk) in targets.iter().enumerate() {
+            if let Err(e) =
+                write_value_backup_restore(RegHive::Hklm, sk, "MSISupported", &RegValue::DWord(1))
+            {
+                if created && modified == 0 {
+                    let _ = backups.remove(self.meta.id);
+                }
+                return Err(e);
+            }
+        }
+        Ok(format!("MSI Mode garantido em {} controlador(es) NVMe/AHCI.", targets.len()))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de MSI NVMe/AHCI encontrado.".into());
+        };
+        let snap: Vec<RegSnapshotEntry> =
+            serde_json::from_value(rec.data).map_err(|e| e.to_string())?;
+        for e in &snap {
+            if e.existed {
+                if let Some(v) = &e.value {
+                    write_value_backup_restore(e.hive, &e.subkey, &e.name, v)?;
+                }
+            } else {
+                delete_value_backup_restore(e.hive, &e.subkey, &e.name)?;
+            }
+        }
+        backups.remove(self.meta.id)?;
+        Ok(format!("MSI Mode NVMe/AHCI restaurado em {} item(ns).", snap.len()))
     }
 }

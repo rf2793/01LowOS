@@ -158,7 +158,10 @@ pub fn run_self_test<F: FnMut(&str)>(
             _ if !include_heavy
                 && matches!(
                     m.id,
-                    "bloat.optional_features_off" | "bloat.system_appx" | "bloat.consumer_appx"
+                    "bloat.optional_features_off"
+                        | "bloat.system_appx"
+                        | "bloat.consumer_appx"
+                        | "power.hiberfil_off"
                 ) =>
             {
                 Some("pesado (use --self-test-all)".into())
@@ -181,7 +184,10 @@ pub fn run_self_test<F: FnMut(&str)>(
         let after_revert = t.check();
 
         let apply_ok_status = matches!(after_apply, TweakStatus::Applied)
-            || (matches!(m.id, "tasks.windows_bloat" | "net.wol_eee_off")
+            || (matches!(
+                m.id,
+                "tasks.windows_bloat" | "net.wol_eee_off" | "net.qos_nic_flow_off"
+            )
                 && matches!(after_apply, TweakStatus::Partial(_))
                 && after_apply != before);
         let ok = apply_res.is_ok()

@@ -47,7 +47,7 @@ impl Tweak for NicRssTweak {
 
     fn check(&self) -> TweakStatus {
         let script = r#"
-$phys = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+$phys = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -ne 'Not Present' } | ForEach-Object { $_.Name })
 $rss = @(Get-NetAdapterRss -ErrorAction SilentlyContinue | Where-Object { $phys -contains $_.Name })
 if (-not $rss.Count) { Write-Output 'NONE'; exit 0 }
 $ok = @($rss | Where-Object { $_.Enabled -and $_.BaseProcessorNumber -eq 2 -and $_.MaxProcessors -eq 2 }).Count
@@ -80,7 +80,7 @@ Write-Output "$ok/$($rss.Count)"
 
     fn apply(&self, backups: &BackupStore) -> Result<String, String> {
         let query_script = r#"
-$phys = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+$phys = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -ne 'Not Present' } | ForEach-Object { $_.Name })
 $rss = @(Get-NetAdapterRss -ErrorAction SilentlyContinue | Where-Object { $phys -contains $_.Name })
 $rows = foreach ($r in $rss) {
     $m = Get-NetAdapterAdvancedProperty -Name $r.Name -RegistryKeyword '*InterruptModeration' -ErrorAction SilentlyContinue
@@ -108,7 +108,7 @@ if ($rows) { ConvertTo-Json -InputObject @($rows) -Compress } else { '[]' }
         let created = backups.save_if_absent(self.meta.id, json)?;
 
         let apply_script = r#"
-$phys = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+$phys = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -ne 'Not Present' } | ForEach-Object { $_.Name })
 $rss = @(Get-NetAdapterRss -ErrorAction SilentlyContinue | Where-Object { $phys -contains $_.Name })
 $msgs = @()
 foreach ($a in $rss) {
@@ -188,6 +188,14 @@ const WOL_PROPS: &[&str] = &[
     "AdvancedEEE",
     "EnableGreenEthernet",
     "PowerSavingMode",
+    "GigaLite",
+    "GigabitLite",
+    "*IdleRestriction",
+    "EEELinkAdvertisement",
+    "ReduceSpeedOnPowerDown",
+    "EnablePME",
+    "ULPMode",
+    "UltraLowPowerMode",
 ];
 
 pub struct NicWolEeeTweak {
@@ -399,7 +407,7 @@ impl Tweak for NicBindingsTweak {
         let script = format!(
             r#"
 $ids = @({ids})
-$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue)
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object {{ $_.Status -ne 'Not Present' }})
 $total = 0; $off = 0
 foreach ($n in $nics) {{
     foreach ($c in $ids) {{
@@ -444,7 +452,7 @@ Write-Output "$off/$total"
         let query = format!(
             r#"
 $ids = @({ids})
-$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue)
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object {{ $_.Status -ne 'Not Present' }})
 $rows = foreach ($n in $nics) {{
     foreach ($c in $ids) {{
         $b = Get-NetAdapterBinding -Name $n.Name -ComponentID $c -ErrorAction SilentlyContinue
@@ -1015,5 +1023,329 @@ foreach ($r in $rows) {{
     fn reset_to_default(&self) -> Result<String, String> {
         delete_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit")?;
         Ok("Política NonBestEffortLimit removida (padrão do Windows).".into())
+    }
+}
+
+pub struct NicInterruptModerationOffTweak {
+    meta: TweakMeta,
+}
+
+impl NicInterruptModerationOffTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "net.nic_interrupt_moderation_off",
+                name: "Rede: Desativar Interrupt Moderation na placa de rede (menor latência de pacote)",
+                category: Category::Network,
+                risk: RiskLevel::Medium,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Define *InterruptModeration=0 nos adaptadores físicos ativos (Intel I225/I226, Realtek 2.5G/5G), eliminando agrupamento de interrupções para menor jitter em FPS competitivos. Alternativo ao modo conservador do net.rss_cpu2; ideal para CPUs de 6+ núcleos.",
+                details: vec![
+                    "Adaptadores físicos ativos: *InterruptModeration = 0".into(),
+                ],
+            },
+        }
+    }
+}
+
+impl Tweak for NicInterruptModerationOffTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let script = r#"
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -ne 'Not Present' })
+$total = 0; $zero = 0
+foreach ($n in $nics) {
+    $props = @(Get-NetAdapterAdvancedProperty -Name $n.Name -ErrorAction SilentlyContinue | Where-Object { $_.RegistryKeyword -eq '*InterruptModeration' })
+    foreach ($p in $props) {
+        if (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0') {
+            $total++
+            if ([string]@($p.RegistryValue)[0] -eq '0') { $zero++ }
+        }
+    }
+}
+Write-Output "$zero/$total"
+"#;
+        match run_powershell_checked(script) {
+            Ok(out) => {
+                if let Some((a, b)) = out.stdout.trim().split_once('/') {
+                    let ok: usize = a.parse().unwrap_or(0);
+                    let total: usize = b.parse().unwrap_or(0);
+                    if total == 0 {
+                        TweakStatus::NotApplicable("Nenhum adaptador expõe *InterruptModeration".into())
+                    } else if ok == total {
+                        TweakStatus::Applied
+                    } else if ok == 0 {
+                        TweakStatus::NotApplied
+                    } else {
+                        TweakStatus::Partial(format!("{ok}/{total} adaptadores"))
+                    }
+                } else {
+                    TweakStatus::Error(out.stdout)
+                }
+            }
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let query = r#"
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -ne 'Not Present' })
+$rows = foreach ($n in $nics) {
+    $props = @(Get-NetAdapterAdvancedProperty -Name $n.Name -ErrorAction SilentlyContinue | Where-Object { $_.RegistryKeyword -eq '*InterruptModeration' })
+    foreach ($p in $props) {
+        if (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0') {
+            [pscustomobject]@{ nic = $n.Name; key = $p.RegistryKeyword; val = [string]@($p.RegistryValue)[0] }
+        }
+    }
+}
+if ($rows) { ConvertTo-Json -InputObject @($rows) -Compress } else { '[]' }
+"#;
+        let out = run_powershell_checked(query)?;
+        let rows: Vec<WolEntry> =
+            serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
+        if rows.is_empty() {
+            return Ok("Nenhum adaptador expõe *InterruptModeration.".into());
+        }
+        let json = serde_json::to_value(&rows).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        let escaped = serde_json::to_string(&rows)
+            .map_err(|e| e.to_string())?
+            .replace('\'', "''");
+        let apply = format!(
+            r#"
+$rows = @((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }})
+$ok = 0
+foreach ($r in $rows) {{
+    try {{
+        Set-NetAdapterAdvancedProperty -Name $r.nic -RegistryKeyword $r.key -RegistryValue 0 -NoRestart -ErrorAction Stop
+        $ok++
+    }} catch {{}}
+}}
+Write-Output $ok
+"#
+        );
+        match run_powershell_checked(&apply) {
+            Ok(r) => Ok(format!(
+                "Interrupt Moderation desativado em {} adaptador(es).",
+                r.stdout.trim()
+            )),
+            Err(e) => {
+                if created {
+                    let _ = backups.remove(self.meta.id);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de Interrupt Moderation encontrado.".into());
+        };
+        let rows: Vec<WolEntry> =
+            serde_json::from_value(rec.data).map_err(|e| format!("Backup inválido: {e}"))?;
+        let escaped = serde_json::to_string(&rows)
+            .map_err(|e| e.to_string())?
+            .replace('\'', "''");
+        let script = format!(
+            r#"
+$rows = @((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }})
+foreach ($r in $rows) {{
+    if (-not $r.key) {{ continue }}
+    try {{
+        Set-NetAdapterAdvancedProperty -Name $r.nic -RegistryKeyword $r.key -RegistryValue $r.val -NoRestart -ErrorAction Stop
+    }} catch {{}}
+}}
+"#
+        );
+        run_powershell_checked(&script)?;
+        backups.remove(self.meta.id)?;
+        Ok(format!("Interrupt Moderation restaurado ({} item(ns)).", rows.len()))
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        let script = r#"
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -ne 'Not Present' })
+foreach ($n in $nics) {
+    try {
+        Set-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword '*InterruptModeration' -RegistryValue 1 -NoRestart -ErrorAction SilentlyContinue
+    } catch {}
+}
+"#;
+        run_powershell_checked(script)?;
+        Ok("Interrupt Moderation restaurado para Habilitado (1).".into())
+    }
+}
+
+const BBR2_TEMPLATES: &[&str] = &[
+    "Internet",
+    "InternetCustom",
+    "Datacenter",
+    "DatacenterCustom",
+    "Compat",
+];
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Bbr2TemplateEntry {
+    template: String,
+    provider: String,
+}
+
+pub struct NetTcpBbr2Tweak {
+    meta: TweakMeta,
+}
+
+impl NetTcpBbr2Tweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "net.tcp_bbr2_24h2",
+                name: "Rede: Ativar TCP BBR2 (anti-bufferbloat) + correção Loopback Win11 24H2+",
+                category: Category::Network,
+                risk: RiskLevel::Medium,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Ativa o algoritmo de congestionamento TCP BBR2 nos templates Internet/Datacenter/Compat para reduzir bufferbloat em downloads simultâneos, aplicando junto loopbacklargemtu=disable (IPv4/IPv6) para evitar travamento de localhost/Steam no Win11 24H2/25H2.",
+                details: vec![
+                    "netsh int tcp set supplemental Template=Internet/InternetCustom/Datacenter/DatacenterCustom/Compat CongestionProvider=bbr2".into(),
+                    "netsh int ipv4/ipv6 set gl loopbacklargemtu=disable (correção obrigatória Win11 24H2+)".into(),
+                ],
+            },
+        }
+    }
+}
+
+impl Tweak for NetTcpBbr2Tweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let script = r#"
+$t = @(Get-NetTCPSetting -ErrorAction SilentlyContinue | Where-Object { $_.SettingName -in @('Internet','InternetCustom') })
+if (-not $t.Count) { Write-Output 'NONE'; exit 0 }
+$ok = @($t | Where-Object { "$($_.CongestionProvider)" -eq 'BBR2' }).Count
+Write-Output "$ok/$($t.Count)"
+"#;
+        match run_powershell_checked(script) {
+            Ok(out) => {
+                let s = out.stdout.trim();
+                if s == "NONE" {
+                    TweakStatus::NotApplicable("Get-NetTCPSetting indisponível".into())
+                } else if let Some((a, b)) = s.split_once('/') {
+                    let ok: usize = a.parse().unwrap_or(0);
+                    let total: usize = b.parse().unwrap_or(0);
+                    if total == 0 {
+                        TweakStatus::NotApplicable("Sem templates TCP".into())
+                    } else if ok == total {
+                        TweakStatus::Applied
+                    } else if ok == 0 {
+                        TweakStatus::NotApplied
+                    } else {
+                        TweakStatus::Partial(format!("{ok}/{total} templates"))
+                    }
+                } else {
+                    TweakStatus::Error(s.to_string())
+                }
+            }
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let templates_ps = BBR2_TEMPLATES
+            .iter()
+            .map(|t| format!("'{t}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let query = format!(
+            r#"
+$list = @({templates_ps})
+$rows = @(Get-NetTCPSetting -ErrorAction Stop | Where-Object {{ $list -contains $_.SettingName }} | ForEach-Object {{
+    [pscustomobject]@{{ template = $_.SettingName; provider = [string]$_.CongestionProvider }}
+}})
+if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
+"#
+        );
+        let out = run_powershell_checked(&query)?;
+        let rows: Vec<Bbr2TemplateEntry> =
+            serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
+        if rows.is_empty() {
+            return Err("Nenhum template TCP encontrado.".into());
+        }
+        let json = serde_json::to_value(&rows).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        let apply_script = format!(
+            r#"
+$list = @({templates_ps})
+foreach ($tpl in $list) {{
+    & netsh.exe int tcp set supplemental Template=$tpl CongestionProvider=bbr2 | Out-Null
+}}
+& netsh.exe int ipv4 set gl loopbacklargemtu=disable | Out-Null
+& netsh.exe int ipv6 set gl loopbacklargemtu=disable | Out-Null
+"#
+        );
+        if let Err(e) = run_powershell_checked(&apply_script) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
+        Ok(format!(
+            "TCP BBR2 ativado em {} template(s) + loopbacklargemtu=disable (IPv4/IPv6).",
+            rows.len()
+        ))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de TCP BBR2 encontrado.".into());
+        };
+        let rows: Vec<Bbr2TemplateEntry> =
+            serde_json::from_value(rec.data).map_err(|e| format!("Backup inválido: {e}"))?;
+        let escaped = serde_json::to_string(&rows)
+            .map_err(|e| e.to_string())?
+            .replace('\'', "''");
+        let script = format!(
+            r#"
+$rows = @((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }})
+foreach ($r in $rows) {{
+    if (-not $r.template -or -not $r.provider) {{ continue }}
+    & netsh.exe int tcp set supplemental Template=$($r.template) CongestionProvider=$($r.provider.ToLowerInvariant()) | Out-Null
+}}
+& netsh.exe int ipv4 set gl loopbacklargemtu=enable | Out-Null
+& netsh.exe int ipv6 set gl loopbacklargemtu=enable | Out-Null
+"#
+        );
+        run_powershell_checked(&script)?;
+        backups.remove(self.meta.id)?;
+        Ok("Provedor TCP original (CUBIC/NewReno) e loopbacklargemtu restaurados.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        let script = r#"
+foreach ($tpl in @('Internet','InternetCustom','Datacenter','DatacenterCustom')) {
+    & netsh.exe int tcp set supplemental Template=$tpl CongestionProvider=cubic | Out-Null
+}
+& netsh.exe int tcp set supplemental Template=Compat CongestionProvider=newreno | Out-Null
+& netsh.exe int ipv4 set gl loopbacklargemtu=enable | Out-Null
+& netsh.exe int ipv6 set gl loopbacklargemtu=enable | Out-Null
+"#;
+        run_powershell_checked(script)?;
+        Ok("Provedor TCP restaurado para o padrão (CUBIC/NewReno).".into())
     }
 }

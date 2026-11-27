@@ -192,6 +192,134 @@ pub fn clean_shader_caches() -> (usize, u64, usize) {
     (deleted, freed, skipped)
 }
 
+fn candidate_temp_dirs() -> Vec<(&'static str, PathBuf)> {
+    let mut dirs = Vec::new();
+    if let Some(t) = std::env::var_os("TEMP").map(PathBuf::from) {
+        dirs.push(("Temp do Usuário", t));
+    }
+    let win_root = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    dirs.push(("Windows\\Temp", win_root.join("Temp")));
+    dirs.push((
+        "Cache Windows Update",
+        win_root.join("SoftwareDistribution").join("Download"),
+    ));
+    dirs
+}
+
+pub fn scan_temp_caches() -> Vec<ShaderCacheDir> {
+    candidate_temp_dirs()
+        .into_iter()
+        .filter(|(_, p)| p.is_dir())
+        .map(|(label, path)| {
+            let (files, bytes) = dir_stats(&path);
+            ShaderCacheDir {
+                label: label.to_string(),
+                path,
+                files,
+                bytes,
+            }
+        })
+        .collect()
+}
+
+pub fn clean_temp_caches() -> (usize, u64, usize) {
+    let mut deleted = 0usize;
+    let mut freed = 0u64;
+    let mut skipped = 0usize;
+    for (_, path) in candidate_temp_dirs() {
+        if path.is_dir() {
+            let (d, f, s) = clear_dir_files(&path);
+            deleted += d;
+            freed += f;
+            skipped += s;
+        }
+    }
+    (deleted, freed, skipped)
+}
+
+#[derive(Debug, Clone)]
+pub struct HealthItem {
+    pub label: &'static str,
+    pub ok: bool,
+    pub detail: String,
+}
+
+fn svc_not_disabled(name: &str) -> bool {
+    let subkey = format!(r"SYSTEM\CurrentControlSet\Services\{name}");
+    !matches!(
+        crate::sys::registry::read_value(crate::sys::registry::RegHive::Hklm, &subkey, "Start"),
+        Ok(Some(crate::sys::registry::RegValue::DWord(4)))
+    )
+}
+
+pub fn read_gaming_health() -> Vec<HealthItem> {
+    use crate::sys::registry::{read_value, RegHive, RegValue};
+
+    let hags = matches!(
+        read_value(
+            RegHive::Hklm,
+            r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers",
+            "HwSchMode"
+        ),
+        Ok(Some(RegValue::DWord(2)))
+    );
+    let hvci_off = !matches!(
+        read_value(
+            RegHive::Hklm,
+            r"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity",
+            "Enabled"
+        ),
+        Ok(Some(RegValue::DWord(1)))
+    );
+    let game_mode = matches!(
+        read_value(
+            RegHive::Hkcu,
+            r"Software\Microsoft\GameBar",
+            "AutoGameModeEnabled"
+        ),
+        Ok(Some(RegValue::DWord(1)))
+    );
+    let onedrive_ok = svc_not_disabled("CldFlt");
+    let exitlag_ok =
+        svc_not_disabled("WinHttpAutoProxySvc") && svc_not_disabled("iphlpsvc") && svc_not_disabled("Wcmsvc");
+    let ms_acc_ok = svc_not_disabled("TokenBroker") && svc_not_disabled("wlidsvc");
+
+    vec![
+        HealthItem {
+            label: "HAGS",
+            ok: hags,
+            detail: if hags { "Ativo (2)".into() } else { "Inativo".into() },
+        },
+        HealthItem {
+            label: "VBS / HVCI",
+            ok: hvci_off,
+            detail: if hvci_off { "Desligado".into() } else { "Ativo".into() },
+        },
+        HealthItem {
+            label: "Modo de Jogo",
+            ok: game_mode,
+            detail: if game_mode { "Ativo".into() } else { "Inativo".into() },
+        },
+        HealthItem {
+            label: "OneDrive (CldFlt)",
+            ok: onedrive_ok,
+            detail: if onedrive_ok { "Preservado".into() } else { "Desativado".into() },
+        },
+        HealthItem {
+            label: "ExitLag / VPNs",
+            ok: exitlag_ok,
+            detail: if exitlag_ok { "Pronto".into() } else { "Serviço bloqueado".into() },
+        },
+        HealthItem {
+            label: "Conta Microsoft",
+            ok: ms_acc_ok,
+            detail: if ms_acc_ok { "Preservada".into() } else { "Serviço bloqueado".into() },
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
