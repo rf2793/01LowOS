@@ -12,7 +12,7 @@ use crate::tweaks::advanced::{
     UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
 };
 use crate::tweaks::network::{
-    NetQosNicFlowTweak, NetRscUdpLatencyTweak, NetTcpBbr2Tweak, NicBindingsTweak,
+    NetBiosOffTweak, NetQosNicFlowTweak, NetRscUdpLatencyTweak, NetTcpBbr2Tweak, NicBindingsTweak,
     NicInterruptModerationOffTweak, NicRssTweak, NicWolEeeTweak, WinInetWpadTweak,
 };
 use crate::tweaks::power::{DeviceWakeTweak, HiberfilOffTweak, PowerPlanTweak};
@@ -29,7 +29,7 @@ fn sz(v: &str) -> RegValue {
 }
 
 pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
-    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(90);
+    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(96);
 
     // 1. GPU & LATÊNCIA
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -496,6 +496,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(NetQosNicFlowTweak::new()));
     list.push(Box::new(NicInterruptModerationOffTweak::new()));
     list.push(Box::new(NetTcpBbr2Tweak::new()));
+    list.push(Box::new(NetBiosOffTweak::new()));
     list.push(Box::new(CloudflareDnsTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -646,6 +647,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "EnableSnapAssistFlyout", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "EnableSnapBar", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_TrackProgs", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_TrackDocs", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_AccountNotifications", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_IrisRecommendations", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "ShowSyncProviderNotifications", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\TaskbarDeveloperSettings", "TaskbarEndTask", dw(1)),
@@ -658,6 +661,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hkcu, r"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32", ""),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "HideFileExt", dw(1)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Hidden", dw(2)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_TrackDocs", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_AccountNotifications", dw(1)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "ShowTaskViewButton", dw(1)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\TaskbarDeveloperSettings", "TaskbarEndTask", dw(0)),
         ],
@@ -739,9 +744,26 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo", "Enabled", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\InputPersonalization", "RestrictImplicitInkCollection", dw(1)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\InputPersonalization", "RestrictImplicitTextCollection", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Input\TIPC", "Enabled", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Privacy", "TailoredExperiencesWithDiagnosticDataEnabled", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Personalization\Settings", "AcceptedPrivacyPolicy", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Control Panel\International\User Profile", "HttpAcceptLanguageOptOut", dw(1)),
         ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "user.sound_scheme_none",
+            name: "Áudio: Esquema de sons do Windows em Sem Som (.None)",
+            category: Category::UserHkcu,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: false,
+            description: "Define o esquema de sons do sistema como .None, evitando disparos de áudio de notificação do Windows pelo audiodg.exe durante jogos (100% reversível).",
+            details: vec![],
+        },
+        vec![RegOp::set(RegHive::Hkcu, r"AppEvents\Schemes", "", sz(".None"))],
+        vec![RegOp::set(RegHive::Hkcu, r"AppEvents\Schemes", "", sz(".Default"))],
     )));
 
     // 6. PRIVACIDADE & BLOAT
@@ -851,6 +873,51 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "DisableSearch"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer", "AllowOnlineTips"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "DisableDiagnosticDataViewer"),
+        ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "bloat.appcompat_sqm_telemetry",
+            name: "Políticas GPO: Desativar AppCompat, CEIP/SQM, Dumps de Diagnóstico e Auto-Restart",
+            category: Category::PrivacyBloat,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Aplica políticas oficiais GPO da Microsoft para desligar telemetria AppCompat (AIT/PCA/Steps Recorder), CEIP/SQM, coleta de logs/dumps de diagnóstico, OneSettings, escrita à mão, Histórico de Arquivos, tráfego de Mapas e reabertura automática pós-update.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppCompat", "AITEnable", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppCompat", "DisableInventory", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppCompat", "DisablePCA", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppCompat", "DisableUAR", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\SQMClient\Windows", "CEIPEnable", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "LimitDiagnosticLogCollection", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "LimitDumpCollection", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "DisableOneSettingsDownloads", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\HandwritingErrorReports", "PreventHandwritingErrorReports", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\TabletPC", "PreventHandwritingDataSharing", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\FileHistory", "Disabled", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Maps", "AutoDownloadAndUpdateMapData", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Maps", "AllowUntriggeredNetworkTrafficOnSettingsPage", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "DisableAutomaticRestartSignOn", dw(1)),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppCompat", "AITEnable"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppCompat", "DisableInventory"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppCompat", "DisablePCA"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppCompat", "DisableUAR"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\SQMClient\Windows", "CEIPEnable"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "LimitDiagnosticLogCollection"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "LimitDumpCollection"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "DisableOneSettingsDownloads"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\HandwritingErrorReports", "PreventHandwritingErrorReports"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\TabletPC", "PreventHandwritingDataSharing"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\FileHistory", "Disabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Maps", "AutoDownloadAndUpdateMapData"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Maps", "AllowUntriggeredNetworkTrafficOnSettingsPage"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "DisableAutomaticRestartSignOn"),
         ],
     )));
 
@@ -1044,6 +1111,20 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             details: vec![],
         },
         vec![ServiceTarget::disable("hidserv")],
+    )));
+
+    list.push(Box::new(ServiceGroupTweak::new(
+        TweakMeta {
+            id: "svc.gameinput_off",
+            name: "Serviço: Desativar GameInputSvc (picos de latência DPC Win11 24H2+)",
+            category: Category::WindowsServices,
+            risk: RiskLevel::Medium,
+            requires_reboot: true,
+            requires_admin: true,
+            description: "Desativa o serviço Microsoft GameInput (GameInputSvc), causa conhecida de picos periódicos de latência DPC e micro-engasgos no Windows 11 24H2/25H2. Atenção: controles Xbox ou joysticks dependentes de GameInput podem parar até reverter; teclado e mouse continuam normais.",
+            details: vec![],
+        },
+        vec![ServiceTarget::disable("GameInputSvc")],
     )));
 
     list.push(Box::new(ServiceGroupTweak::new(
@@ -1408,6 +1489,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "net.wininet_wpad_off",
     "net.rsc_udp_latency",
     "net.qos_nic_flow_off",
+    "net.netbios_off",
     "user.mouse_raw",
     "user.keyboard_accessibility",
     "user.visual_perf",
@@ -1415,6 +1497,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "user.audio_no_ducking",
     "user.privacy_hkcu",
     "bloat.ai_search_cloud",
+    "bloat.appcompat_sqm_telemetry",
     "bloat.edge_background_off",
     "bloat.maintenance_background_off",
     "bloat.actioncenter_sso",
@@ -1440,7 +1523,7 @@ mod tests {
     #[test]
     fn catalog_ids_are_unique_and_non_empty() {
         let cat = build_catalog();
-        assert!(cat.len() >= 45);
+        assert!(cat.len() >= 91);
         validate_catalog(&cat).unwrap();
     }
 
@@ -1484,6 +1567,13 @@ mod tests {
                 assert!(!low.contains("rmdisablepostl2compression"), "Tweak instável proibido em {}", meta.id);
                 assert!(!low.contains("maximumdpcqueuedepth"), "Placebo proibido em {}", meta.id);
                 assert!(!low.contains("svchostsplitthresholdinkb"), "SvcHost collapse proibido em {}", meta.id);
+                assert!(!low.contains("tcpwindowsize"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("irpstacksize"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("nonpagedpoolsize"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("disabletaskoffload"), "Tweak toxico proibido em {}", meta.id);
+                assert!(!low.contains("stuttermode"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("kmd_enableinternallargepage"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("rmgpspsenablepercpucoredpc"), "Placebo proibido em {}", meta.id);
                 if !low.starts_with("remover ") {
                     assert!(!low.contains("iopagelocklimit"), "Placebo proibido em {}", meta.id);
                     assert!(!low.contains("globaltimerresolutionrequests"), "Timer global proibido em {}", meta.id);

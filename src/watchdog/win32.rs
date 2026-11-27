@@ -41,7 +41,7 @@ pub struct CpuTopology {
 impl CpuTopology {
     pub fn from_counts(logical_count: usize, physical_cores: usize) -> Self {
         let logical = logical_count.max(1).min(usize::BITS as usize);
-        let smt_enabled = physical_cores > 0 && logical == physical_cores * 2;
+        let smt_enabled = physical_cores > 0 && logical > physical_cores;
         let all_mask = if logical >= usize::BITS as usize {
             usize::MAX
         } else {
@@ -435,4 +435,31 @@ pub fn has_visible_window_for_pids(pids: &HashSet<u32>) -> bool {
         EnumWindows(Some(enum_win_cb), &mut ctx as *mut _ as LPARAM);
     }
     ctx.found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CpuTopology;
+
+    #[test]
+    fn cpu_topology_handles_smt_nosmt_hybrid_and_single_core() {
+        let no_smt = CpuTopology::from_counts(8, 8);
+        assert!(!no_smt.smt_enabled);
+        assert_eq!(no_smt.background_mask, 0x1);
+        assert_eq!(no_smt.game_mask, 0xFE);
+
+        let smt = CpuTopology::from_counts(16, 8);
+        assert!(smt.smt_enabled);
+        assert_eq!(smt.background_mask, 0x3);
+        assert_eq!(smt.game_mask, 0xFFFC);
+
+        let hybrid = CpuTopology::from_counts(20, 14);
+        assert!(hybrid.smt_enabled);
+        assert_eq!(hybrid.background_mask, 0x3);
+        assert_eq!(hybrid.game_mask, 0xFFFFC);
+
+        let single = CpuTopology::from_counts(1, 1);
+        assert!(!single.smt_enabled);
+        assert_eq!(single.background_mask, 0x1);
+    }
 }

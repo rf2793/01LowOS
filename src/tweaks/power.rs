@@ -19,6 +19,7 @@ const SUB_SLEEP: &str = "238c9fa8-0aad-41ed-83f4-97be242c8f20";
 const SUB_PCIE: &str = "501a4d13-42af-4429-9fd1-a8218c268e20";
 const SUB_BUTTON: &str = "4f971e89-eebd-4455-a8de-9e59040e7347";
 const SUB_VIDEO: &str = "7516b95f-f776-4464-8c53-06167f40cc99";
+const SUB_WIRELESS: &str = "19cbb8fa-5279-450e-9fac-8a3d5fedd0c1";
 
 struct PowerSettingDef {
     name: &'static str,
@@ -48,6 +49,16 @@ const POWER_SETTINGS: &[PowerSettingDef] = &[
     PowerSettingDef { name: "UNATTENDSLEEP", subgroup: SUB_SLEEP, setting: "7bc4a2f9-d8fc-4469-b07b-33eb785aaca0", value: 0 },
     PowerSettingDef { name: "SBUTTONACTION", subgroup: SUB_BUTTON, setting: "96996bc0-ad50-47ec-923b-6f41874dd9eb", value: 0 },
     PowerSettingDef { name: "VIDEOIDLE", subgroup: SUB_VIDEO, setting: "3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e", value: 0 },
+];
+
+const EXTRA_POWER_SETTINGS: &[PowerSettingDef] = &[
+    PowerSettingDef { name: "PERFINCPOL", subgroup: SUB_CPU, setting: "465e1f50-b610-473a-ab58-00d1077dc418", value: 2 },
+    PowerSettingDef { name: "NVMEIDLETIMEOUT2", subgroup: SUB_DISK, setting: "d3d55efd-c1ff-424e-9dc3-441be7833010", value: 0 },
+    PowerSettingDef { name: "NVMELATENCYTOLERANCE2", subgroup: SUB_DISK, setting: "dbc9e238-6de9-49e3-92cd-8c2b4946b472", value: 0 },
+    PowerSettingDef { name: "NVMENOPPME", subgroup: SUB_DISK, setting: "fc7372b6-ab2d-43ee-8797-15e9841f2cca", value: 0 },
+    PowerSettingDef { name: "AHCI_HIPM_DIPM", subgroup: SUB_DISK, setting: "0b2d69d7-a2a1-449c-9680-f91c70521c60", value: 0 },
+    PowerSettingDef { name: "AHCI_ADAPTIVE", subgroup: SUB_DISK, setting: "dab60367-53fe-4fbc-825e-521d069d2456", value: 0 },
+    PowerSettingDef { name: "WIRELESS_POWER", subgroup: SUB_WIRELESS, setting: "12bbebe6-58d6-4636-95bb-3217ef867c1a", value: 0 },
 ];
 
 pub fn extract_guid(text: &str) -> Option<String> {
@@ -105,6 +116,9 @@ impl PowerPlanTweak {
             .iter()
             .map(|s| format!("{} = {}", s.name, s.value))
             .collect();
+        for s in EXTRA_POWER_SETTINGS {
+            details.push(format!("{} = {} (opcional/se suportado)", s.name, s.value));
+        }
         details.insert(0, format!("Plano clonado: '{PLAN_DISPLAY_NAME}'"));
         Self {
             meta: TweakMeta {
@@ -114,10 +128,23 @@ impl PowerPlanTweak {
                 risk: RiskLevel::Low,
                 requires_reboot: false,
                 requires_admin: true,
-                description: "Clona o plano Alto Desempenho e aplica os 20 parâmetros validados (CPPC 100%, C-states mantidos, ASPM/USB LPM/NVMe APST off, sem suspensão).",
+                description: "Clona o plano Alto Desempenho e aplica 20 parâmetros principais + 7 extras validados (CPPC 100%, CPU Rocket, C-states mantidos, ASPM/USB LPM/NVMe Primário+Secundário/NOPPME/AHCI LPM off, Wi-Fi Max Perf e sem suspensão).",
                 details,
             },
         }
+    }
+
+    fn find_existing_plan_guid() -> Option<String> {
+        let out = run_hidden_checked("powercfg.exe", &["/list"], &[0]).ok()?;
+        let target_low = PLAN_DISPLAY_NAME.to_ascii_lowercase();
+        for line in out.stdout.lines() {
+            if line.to_ascii_lowercase().contains(&target_low) {
+                if let Some(guid) = extract_guid(line) {
+                    return Some(guid);
+                }
+            }
+        }
+        None
     }
 
     fn get_active_scheme_line() -> Result<(String, String), String> {
@@ -168,16 +195,23 @@ impl Tweak for PowerPlanTweak {
 
     fn apply(&self, backups: &BackupStore) -> Result<String, String> {
         let (old_active, line) = Self::get_active_scheme_line()?;
-        let reuse_plan = line
+        let active_is_ours = line
             .to_ascii_lowercase()
             .contains(&PLAN_DISPLAY_NAME.to_ascii_lowercase());
+        let existing_inactive = if active_is_ours {
+            None
+        } else {
+            Self::find_existing_plan_guid()
+        };
 
-        let new_plan = if reuse_plan {
+        let new_plan = if active_is_ours {
             old_active.clone()
+        } else if let Some(ref existing) = existing_inactive {
+            existing.clone()
         } else {
             generate_guid()
         };
-        let revert_target = if reuse_plan {
+        let revert_target = if active_is_ours {
             BALANCED_GUID.to_string()
         } else {
             old_active.clone()
@@ -194,7 +228,7 @@ impl Tweak for PowerPlanTweak {
         }
 
         let mut created_plan = false;
-        if !reuse_plan {
+        if !active_is_ours && existing_inactive.is_none() {
             let list_out = run_hidden_checked("powercfg.exe", &["/list"], &[0])?;
             let base_plan = if list_out
                 .stdout
@@ -253,6 +287,20 @@ impl Tweak for PowerPlanTweak {
             }
         }
 
+        let mut extra_ok = 0usize;
+        for s in EXTRA_POWER_SETTINGS {
+            let val_str = s.value.to_string();
+            if run_hidden_checked(
+                "powercfg.exe",
+                &["/setacvalueindex", &new_plan, s.subgroup, s.setting, &val_str],
+                &[0],
+            )
+            .is_ok()
+            {
+                extra_ok += 1;
+            }
+        }
+
         run_hidden_checked("powercfg.exe", &["/setactive", &new_plan], &[0])?;
         let (verify_guid, _) = Self::get_active_scheme_line()?;
         if verify_guid != new_plan {
@@ -260,8 +308,9 @@ impl Tweak for PowerPlanTweak {
         }
 
         Ok(format!(
-            "Plano '{PLAN_DISPLAY_NAME}' ({new_plan}) ativo com {} ajustes.",
-            POWER_SETTINGS.len()
+            "Plano '{PLAN_DISPLAY_NAME}' ({new_plan}) ativo com {} ajustes principais + {extra_ok}/{} extras.",
+            POWER_SETTINGS.len(),
+            EXTRA_POWER_SETTINGS.len()
         ))
     }
 
@@ -438,6 +487,25 @@ impl HiberfilOffTweak {
         let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
         PathBuf::from(format!(r"{drive}\hiberfil.sys"))
     }
+
+    fn is_hibernate_enabled_reg() -> bool {
+        let h = read_value(
+            RegHive::Hklm,
+            r"SYSTEM\CurrentControlSet\Control\Power",
+            "HibernateEnabled",
+        );
+        if let Ok(Some(RegValue::DWord(v))) = h {
+            return v != 0;
+        }
+        matches!(
+            read_value(
+                RegHive::Hklm,
+                r"SYSTEM\CurrentControlSet\Control\Power",
+                "HibernateEnabledDefault",
+            ),
+            Ok(Some(RegValue::DWord(1)))
+        )
+    }
 }
 
 impl Tweak for HiberfilOffTweak {
@@ -447,14 +515,7 @@ impl Tweak for HiberfilOffTweak {
 
     fn check(&self) -> TweakStatus {
         let exists = Self::hiberfil_path().exists();
-        let enabled = matches!(
-            read_value(
-                RegHive::Hklm,
-                r"SYSTEM\CurrentControlSet\Control\Power",
-                "HibernateEnabled"
-            ),
-            Ok(Some(RegValue::DWord(1)))
-        );
+        let enabled = Self::is_hibernate_enabled_reg();
         if !exists && !enabled {
             TweakStatus::Applied
         } else {
@@ -463,8 +524,8 @@ impl Tweak for HiberfilOffTweak {
     }
 
     fn apply(&self, backups: &BackupStore) -> Result<String, String> {
-        let existed = Self::hiberfil_path().exists();
-        let json = serde_json::json!({ "existed": existed });
+        let was_enabled = Self::is_hibernate_enabled_reg() || Self::hiberfil_path().exists();
+        let json = serde_json::json!({ "was_enabled": was_enabled });
         let created = backups.save_if_absent(self.meta.id, json)?;
         if let Err(e) = run_hidden_checked("powercfg.exe", &["/h", "off"], &[0]) {
             if created {
@@ -479,8 +540,11 @@ impl Tweak for HiberfilOffTweak {
         let Some(rec) = backups.load(self.meta.id)? else {
             return Err("Nenhum backup de hibernação encontrado.".into());
         };
-        let existed = rec.data["existed"].as_bool().unwrap_or(true);
-        if existed {
+        let was_enabled = rec.data["was_enabled"]
+            .as_bool()
+            .or_else(|| rec.data["existed"].as_bool())
+            .unwrap_or(true);
+        if was_enabled {
             run_hidden_checked("powercfg.exe", &["/h", "on"], &[0])?;
         }
         backups.remove(self.meta.id)?;

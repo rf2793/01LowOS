@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::sys::backup::BackupStore;
 use crate::sys::cmd::run_powershell_checked;
-use crate::sys::registry::{delete_value, read_value, write_value, RegHive, RegValue};
+use crate::sys::registry::{delete_value, list_subkeys, read_value, write_value, RegHive, RegValue};
 use crate::tweaks::{Category, RiskLevel, Tweak, TweakMeta, TweakStatus};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1347,5 +1347,158 @@ foreach ($tpl in @('Internet','InternetCustom','Datacenter','DatacenterCustom'))
 "#;
         run_powershell_checked(script)?;
         Ok("Provedor TCP restaurado para o padrão (CUBIC/NewReno).".into())
+    }
+}
+
+const NETBT_INTERFACES_KEY: &str = r"SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NetBiosEntry {
+    subkey: String,
+    existed: bool,
+    value: Option<RegValue>,
+}
+
+pub struct NetBiosOffTweak {
+    meta: TweakMeta,
+}
+
+impl NetBiosOffTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "net.netbios_off",
+                name: "Rede: Desativar NetBIOS sobre TCP/IP nas interfaces (NetbiosOptions=2)",
+                category: Category::Network,
+                risk: RiskLevel::Low,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Define NetbiosOptions=2 nas interfaces Tcpip_* em NetBT\\Parameters\\Interfaces, eliminando tráfego legado de broadcast NetBIOS (portas 137–139) sem afetar jogos, DNS ou VPNs.",
+                details: vec![
+                    format!(r"HKLM\{NETBT_INTERFACES_KEY}\Tcpip_*\NetbiosOptions = 2"),
+                ],
+            },
+        }
+    }
+
+    fn tcpip_subkeys() -> Vec<String> {
+        list_subkeys(RegHive::Hklm, NETBT_INTERFACES_KEY)
+            .into_iter()
+            .filter(|s| s.to_ascii_lowercase().starts_with("tcpip_"))
+            .collect()
+    }
+}
+
+impl Tweak for NetBiosOffTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let keys = Self::tcpip_subkeys();
+        if keys.is_empty() {
+            return TweakStatus::NotApplicable("Nenhuma interface NetBT encontrada".into());
+        }
+        let mut ok = 0usize;
+        for sub in &keys {
+            let full = format!(r"{NETBT_INTERFACES_KEY}\{sub}");
+            match read_value(RegHive::Hklm, &full, "NetbiosOptions") {
+                Ok(Some(RegValue::DWord(2))) => ok += 1,
+                Ok(_) => {}
+                Err(e) => return TweakStatus::Error(e),
+            }
+        }
+        if ok == keys.len() {
+            TweakStatus::Applied
+        } else if ok == 0 {
+            TweakStatus::NotApplied
+        } else {
+            TweakStatus::Partial(format!("{ok}/{} interfaces", keys.len()))
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let keys = Self::tcpip_subkeys();
+        if keys.is_empty() {
+            return Ok("Nenhuma interface NetBT encontrada.".into());
+        }
+        let mut snap = Vec::with_capacity(keys.len());
+        for sub in &keys {
+            let full = format!(r"{NETBT_INTERFACES_KEY}\{sub}");
+            let cur = read_value(RegHive::Hklm, &full, "NetbiosOptions")?;
+            snap.push(NetBiosEntry {
+                subkey: full,
+                existed: cur.is_some(),
+                value: cur,
+            });
+        }
+        let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        for entry in &snap {
+            if let Err(e) = write_value(
+                RegHive::Hklm,
+                &entry.subkey,
+                "NetbiosOptions",
+                &RegValue::DWord(2),
+            ) {
+                for prev in &snap {
+                    if prev.existed {
+                        if let Some(ref v) = prev.value {
+                            let _ = write_value(RegHive::Hklm, &prev.subkey, "NetbiosOptions", v);
+                        }
+                    } else {
+                        let _ = delete_value(RegHive::Hklm, &prev.subkey, "NetbiosOptions");
+                    }
+                }
+                if created {
+                    let _ = backups.remove(self.meta.id);
+                }
+                return Err(e);
+            }
+        }
+
+        Ok(format!(
+            "NetBIOS sobre TCP/IP desativado em {} interface(s).",
+            snap.len()
+        ))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de NetBIOS encontrado.".into());
+        };
+        let snap: Vec<NetBiosEntry> =
+            serde_json::from_value(rec.data).map_err(|e| format!("Backup inválido: {e}"))?;
+        for entry in &snap {
+            if entry.existed {
+                if let Some(ref v) = entry.value {
+                    write_value(RegHive::Hklm, &entry.subkey, "NetbiosOptions", v)?;
+                }
+            } else {
+                delete_value(RegHive::Hklm, &entry.subkey, "NetbiosOptions")?;
+            }
+        }
+        backups.remove(self.meta.id)?;
+        Ok(format!(
+            "NetbiosOptions restaurado em {} interface(s).",
+            snap.len()
+        ))
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        let keys = Self::tcpip_subkeys();
+        for sub in &keys {
+            let full = format!(r"{NETBT_INTERFACES_KEY}\{sub}");
+            write_value(RegHive::Hklm, &full, "NetbiosOptions", &RegValue::DWord(0))?;
+        }
+        Ok(format!(
+            "NetbiosOptions restaurado para padrão DHCP (0) em {} interface(s).",
+            keys.len()
+        ))
     }
 }
