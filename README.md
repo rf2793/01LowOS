@@ -1,6 +1,6 @@
 # 01LowOS — Otimizador Modular para Windows 11 em Rust
 
-Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL-3.0), para gerenciar, aplicar, verificar e reverter **individualmente** **114 otimizações** de latência, GPU, rede, energia, privacidade e serviços no Windows 11 (`24H2` / `25H2` / `26H1`), com snapshot e backup atômico por ajuste.
+Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL-3.0), para gerenciar, aplicar, verificar e reverter **individualmente** **115 otimizações** de latência, GPU, rede, energia, privacidade e serviços no Windows 11 (`24H2` / `25H2` / `26H1`), com snapshot e backup atômico por ajuste.
 
 - **Download do executável (Releases):** https://github.com/rf2793/01LowOS/releases
 - **Reportar problemas:** https://github.com/rf2793/01LowOS/issues
@@ -8,7 +8,7 @@ Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL
 
 ## Destaques
 
-1. **Melhorias Individuais (114 ajustes granulares)**:
+1. **Melhorias Individuais (115 ajustes granulares)**:
    - Organizadas por categoria (`GPU & Latência`, `Sistema & Kernel`, `Energia`, `Rede`, `Usuário (HKCU)`, `Privacidade & Bloat`, `Serviços Windows`, `Terceiros`, `Tarefas Agendadas`, `ETW Autologgers`), incluindo Plano de Energia 01LowOS (CPU Rocket + CPPC autônomo + Efficiency Class 1 híbrida + NVMe Primário/Secundário + AHCI/Wi-Fi) + Modo de Energia Win11 `Best Performance`, política P-core híbrida Intel, suspensão D3 de Áudio HD off, AMD DeepSleep/ASPM off, `MMAgent` PreLaunch off, bloqueio OEM WPBT (`DisableWpbtExecution=1`), garantia de TRIM ativo, bloqueio de BitLocker automático (`PreventDeviceEncryption=1`), Armazenamento Reservado do Windows (`sys.reserved_storage_off`, opt-in ~7–12 GB), Hipervisor BCD (`sys.hypervisor_off`, opt-in), throttle de CPU do Defender (20%), NetBIOS off, `MaxNegativeCacheTtl=0`, LSO v2 / USO (`net.nic_lso_uso_off`, opt-in troubleshooting), propriedades Wi-Fi MediaTek/Intel sem `*`, `GameInputSvc` (opt-in DPC), Microsoft Store `AutoDownload=2`, privacidade Win11 (`user.nearby_speech_siuf_off`), políticas GPO de logon/tela de bloqueio/AppPrivacy (`bloat.lockscreen_logon_clean`), AppCompat/CEIP, Chrome/Brave/Edge/Firefox, Office/Microsoft 365, Bloco de Notas/CLI, 24 sessões ETW Autologger e Adobe/Intel DSA em Terceiros.
    - Cada melhoria grava snapshot do estado original em `C:\ProgramData\01LowOS\Backups\tweaks\<id>.json` (ou `%LOCALAPPDATA%\01LowOS\Backups\tweaks\` sem elevação) antes de alterar o sistema.
    - Barra de progresso ao vivo, **Preset Jogos Seguro (1-clique)**, **Selecionar todas**, presets salváveis, tooltips explicativos, botão **Detalhes** e reversão unitária/total (**Reverter** / **Padrão Win**).

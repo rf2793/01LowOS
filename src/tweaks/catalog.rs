@@ -21,6 +21,7 @@ use crate::tweaks::network::{
 use crate::tweaks::power::{
     DeviceWakeTweak, HiberfilOffTweak, HybridCpuPcoreTweak, PowerPlanTweak,
 };
+use crate::tweaks::nvidia_drs::NvidiaDrsProfileTweak;
 use crate::tweaks::registry_tweak::{RegOp, RegistryTweak};
 use crate::tweaks::service_tweak::{ServiceGroupTweak, ServiceTarget};
 use crate::tweaks::ssd_only::SsdOnlyTweak;
@@ -184,6 +185,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(NvidiaTelemetryTweak::new()));
     list.push(Box::new(NvidiaDynamicPstateTweak::new()));
     list.push(Box::new(NvidiaHdcpOffTweak::new()));
+    list.push(Box::new(NvidiaDrsProfileTweak::new()));
     list.push(Box::new(AudioEnhancementsTweak::new()));
 
     // 2. SISTEMA & KERNEL

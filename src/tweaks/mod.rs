@@ -1,6 +1,7 @@
 pub mod advanced;
 pub mod catalog;
 pub mod network;
+pub mod nvidia_drs;
 pub mod power;
 pub mod registry_tweak;
 pub mod service_tweak;
