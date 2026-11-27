@@ -2,6 +2,7 @@ mod apps;
 mod iso;
 mod links;
 mod sys;
+mod tools;
 mod tweaks;
 mod ui;
 mod watchdog;

@@ -4054,3 +4054,115 @@ impl Tweak for AmdUlpsOffTweak {
         Ok("EnableUlps definido para padrão (1).".into())
     }
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BcdFlagEntry {
+    flag: String,
+    value: String,
+}
+
+pub struct BcdCleanTimersTweak {
+    meta: TweakMeta,
+}
+
+impl BcdCleanTimersTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "sys.bcd_clean_timers",
+                name: "Limpeza BCD: Remover flags legadas de timer/HPET (se presentes)",
+                category: Category::SystemKernel,
+                risk: RiskLevel::Low,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Verifica o BCD atual ({current}) e remove flags legadas de timer/HPET de scripts antigos que degradam latência DPC e 1% low no Windows 11 24H2/25H2 (com backup para reversão). Se o BCD já estiver limpo, nenhuma alteração é feita.",
+                details: vec![
+                    "REMOVER flags legadas de timer/HPET no BCD (bcdedit /deletevalue {current})".into(),
+                ],
+            },
+        }
+    }
+
+    fn scan_legacy_flags() -> Result<Vec<BcdFlagEntry>, String> {
+        let out = crate::sys::cmd::run_hidden_checked("bcdedit.exe", &["/enum", "{current}"], &[0])?;
+        let mut found = Vec::new();
+        for line in out.stdout.lines() {
+            let mut parts = line.split_whitespace();
+            let Some(key) = parts.next() else {
+                continue;
+            };
+            let low = key.to_ascii_lowercase();
+            if matches!(
+                low.as_str(),
+                "useplatformclock" | "disabledynamictick" | "tscsyncpolicy"
+            ) {
+                let value = parts.collect::<Vec<_>>().join(" ");
+                found.push(BcdFlagEntry {
+                    flag: key.to_string(),
+                    value,
+                });
+            }
+        }
+        Ok(found)
+    }
+}
+
+impl Tweak for BcdCleanTimersTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        if !crate::sys::elevation::is_elevated() {
+            return TweakStatus::NotApplicable("Requer Admin para verificar".into());
+        }
+        match Self::scan_legacy_flags() {
+            Ok(list) if list.is_empty() => TweakStatus::Applied,
+            Ok(_) => TweakStatus::NotApplied,
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let flags = Self::scan_legacy_flags()?;
+        if flags.is_empty() {
+            return Ok("BCD já está limpo (nenhuma flag legada de timer presente).".into());
+        }
+        let json = serde_json::to_value(&flags).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        for (idx, f) in flags.iter().enumerate() {
+            if let Err(e) = crate::sys::cmd::run_hidden_checked(
+                "bcdedit.exe",
+                &["/deletevalue", "{current}", &f.flag],
+                &[0],
+            ) {
+                if created && idx == 0 {
+                    let _ = backups.remove(self.meta.id);
+                }
+                return Err(e);
+            }
+        }
+        Ok(format!(
+            "{} flag(s) legada(s) de timer removida(s) do BCD.",
+            flags.len()
+        ))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de flags BCD encontrado.".into());
+        };
+        let flags: Vec<BcdFlagEntry> =
+            serde_json::from_value(rec.data).map_err(|e| e.to_string())?;
+        for f in &flags {
+            crate::sys::cmd::run_hidden_checked(
+                "bcdedit.exe",
+                &["/set", "{current}", &f.flag, &f.value],
+                &[0],
+            )?;
+        }
+        backups.remove(self.meta.id)?;
+        Ok(format!("{} flag(s) BCD restaurada(s).", flags.len()))
+    }
+}

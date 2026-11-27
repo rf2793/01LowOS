@@ -137,10 +137,29 @@ const IGNORED_LIBRARY_TOOLS: &[&str] = &[
     "UnityCrashHandler32",
 ];
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+fn default_purge_threshold_mb() -> u64 {
+    1024
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WatchdogConfig {
     pub extra_folders: Vec<String>,
     pub ignored_processes: Vec<String>,
+    #[serde(default)]
+    pub auto_purge_standby: bool,
+    #[serde(default = "default_purge_threshold_mb")]
+    pub purge_free_threshold_mb: u64,
+}
+
+impl Default for WatchdogConfig {
+    fn default() -> Self {
+        Self {
+            extra_folders: Vec::new(),
+            ignored_processes: Vec::new(),
+            auto_purge_standby: false,
+            purge_free_threshold_mb: default_purge_threshold_mb(),
+        }
+    }
 }
 
 impl WatchdogConfig {
@@ -494,6 +513,7 @@ fn run_watchdog_loop(stop: Arc<AtomicBool>, snap: Arc<Mutex<WatchdogSnapshot>>) 
     let mut sibling_stems: HashSet<String> = HashSet::new();
     let mut gpu_confirmed = false;
     let mut pdh_fail_streak = 0u32;
+    let mut last_standby_purge: Option<Instant> = None;
 
     while !stop.load(Ordering::SeqCst) {
         if let Ok(g) = snap.lock() {
@@ -586,6 +606,22 @@ fn run_watchdog_loop(stop: Arc<AtomicBool>, snap: Arc<Mutex<WatchdogSnapshot>>) 
                     };
                     if target_aff.is_some() || target_pri.is_some() {
                         let _ = set_process_affinity_and_priority(gid, target_aff, target_pri);
+                    }
+                }
+            }
+
+            if gpu_confirmed
+                && cfg.auto_purge_standby
+                && crate::sys::elevation::is_elevated()
+                && last_standby_purge.is_none_or(|t| t.elapsed() >= Duration::from_secs(60))
+            {
+                if let Some(ram) = crate::sys::memory::query_ram() {
+                    if ram.avail_mb < cfg.purge_free_threshold_mb {
+                        match crate::sys::memory::purge_standby_list() {
+                            Ok(m) => push_log(&snap, format!("[ISLC] {m}")),
+                            Err(e) => push_log(&snap, format!("[ISLC] {e}")),
+                        }
+                        last_standby_purge = Some(Instant::now());
                     }
                 }
             }
@@ -889,6 +925,7 @@ mod tests {
         let cfg = WatchdogConfig {
             extra_folders: vec![r"D:\Jogos".into()],
             ignored_processes: vec!["Wallpaper32".into()],
+            ..Default::default()
         };
         cfg.save_to(&tmp).unwrap();
         let loaded = WatchdogConfig::load_from(&tmp);

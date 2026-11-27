@@ -1,6 +1,7 @@
 pub mod apps_view;
 pub mod backups_view;
 pub mod iso_view;
+pub mod tools_view;
 pub mod tweaks_view;
 pub mod watchdog_view;
 
@@ -24,6 +25,7 @@ use crate::watchdog::{is_autostart_installed, WatchdogEngine};
 pub enum Tab {
     Tweaks,
     Watchdog,
+    Tools,
     Apps,
     IsoBuild,
     Backups,
@@ -74,6 +76,14 @@ pub enum AppMsg {
         ok: bool,
         text: String,
     },
+    CfgListLoaded(Vec<String>),
+    ShaderScanLoaded(Vec<crate::tools::ShaderCacheDir>),
+    ToolBusyDone {
+        ok: bool,
+        text: String,
+        refresh_cfg: bool,
+        refresh_shaders: bool,
+    },
     RestoredFromTray,
     QuitFromTray,
 }
@@ -122,6 +132,12 @@ pub struct LowOsApp {
     pub minimized_to_tray: bool,
     pub app_hwnd: Option<isize>,
     pub show_donate_modal: bool,
+
+    pub cfg_exe_input: String,
+    pub cfg_disabled_list: Vec<String>,
+    pub shader_dirs: Vec<crate::tools::ShaderCacheDir>,
+    pub tools_busy: bool,
+    pub confirm_clean_shaders: bool,
 
     pub tx: Sender<AppMsg>,
     pub rx: Receiver<AppMsg>,
@@ -192,6 +208,11 @@ impl LowOsApp {
             minimized_to_tray: false,
             app_hwnd: None,
             show_donate_modal: false,
+            cfg_exe_input: String::new(),
+            cfg_disabled_list: Vec::new(),
+            shader_dirs: crate::tools::scan_shader_caches(),
+            tools_busy: false,
+            confirm_clean_shaders: false,
             tx,
             rx,
         };
@@ -200,6 +221,7 @@ impl LowOsApp {
         app.trigger_refresh_backups(&cc.egui_ctx);
         app.trigger_check_apps(&cc.egui_ctx);
         app.trigger_check_watchdog_task(&cc.egui_ctx);
+        app.trigger_refresh_cfg(&cc.egui_ctx);
         {
             let snap = std::sync::Arc::clone(&app.watchdog.snapshot);
             let ctx_wd = cc.egui_ctx.clone();
@@ -389,6 +411,27 @@ impl LowOsApp {
         });
     }
 
+    pub fn trigger_refresh_cfg(&self, ctx: &egui::Context) {
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            if let Ok(list) = crate::tools::list_cfg_disabled_exes() {
+                let _ = tx.send(AppMsg::CfgListLoaded(list));
+                ctx.request_repaint();
+            }
+        });
+    }
+
+    pub fn trigger_scan_shaders(&self, ctx: &egui::Context) {
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let list = crate::tools::scan_shader_caches();
+            let _ = tx.send(AppMsg::ShaderScanLoaded(list));
+            ctx.request_repaint();
+        });
+    }
+
     pub fn trigger_check_apps(&self, ctx: &egui::Context) {
         let apps = self.apps.clone();
         let tx = self.tx.clone();
@@ -551,6 +594,28 @@ impl LowOsApp {
                     self.banner = Some((ok, text.clone()));
                     self.push_session_log(text);
                 }
+                AppMsg::CfgListLoaded(list) => {
+                    self.cfg_disabled_list = list;
+                }
+                AppMsg::ShaderScanLoaded(list) => {
+                    self.shader_dirs = list;
+                }
+                AppMsg::ToolBusyDone {
+                    ok,
+                    text,
+                    refresh_cfg,
+                    refresh_shaders,
+                } => {
+                    self.tools_busy = false;
+                    self.banner = Some((ok, text.clone()));
+                    self.push_session_log(text);
+                    if refresh_cfg {
+                        self.trigger_refresh_cfg(ctx);
+                    }
+                    if refresh_shaders {
+                        self.trigger_scan_shaders(ctx);
+                    }
+                }
                 AppMsg::RestoredFromTray => {
                     self.minimized_to_tray = false;
                     self.tray = None;
@@ -635,6 +700,7 @@ impl eframe::App for LowOsApp {
                 let nav_items = [
                     (Tab::Tweaks, "Melhorias Individuais"),
                     (Tab::Watchdog, "Vigia de Afinidade"),
+                    (Tab::Tools, "Ferramentas"),
                     (Tab::Apps, "Aplicativos"),
                     (Tab::IsoBuild, "Build de ISO"),
                     (Tab::Backups, "Backups & Logs"),
@@ -794,6 +860,7 @@ impl eframe::App for LowOsApp {
         egui::CentralPanel::default().show(ctx, |ui| match self.tab {
             Tab::Tweaks => tweaks_view::render(self, ui, ctx),
             Tab::Watchdog => watchdog_view::render(self, ui, ctx),
+            Tab::Tools => tools_view::render(self, ui, ctx),
             Tab::Apps => apps_view::render(self, ui, ctx),
             Tab::IsoBuild => iso_view::render(self, ui, ctx),
             Tab::Backups => backups_view::render(self, ui, ctx),

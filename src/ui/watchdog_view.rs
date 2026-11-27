@@ -221,6 +221,44 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                     cfg_changed = true;
                 }
             });
+            ui.add_space(6.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui
+                    .checkbox(
+                        &mut cfg.auto_purge_standby,
+                        format!(
+                            "Limpar Standby List em jogo se RAM livre < {} MB (ISLC nativo)",
+                            cfg.purge_free_threshold_mb
+                        ),
+                    )
+                    .changed()
+                {
+                    cfg_changed = true;
+                }
+                if let Some(ram) = crate::sys::memory::query_ram() {
+                    ui.label(
+                        RichText::new(format!("RAM livre: {} MB / {} MB", ram.avail_mb, ram.total_mb))
+                            .small()
+                            .monospace()
+                            .color(Color32::from_rgb(148, 163, 184)),
+                    );
+                }
+                if ui
+                    .add_enabled(app.elevated, egui::Button::new("Limpar Standby Agora"))
+                    .on_disabled_hover_text("Execute como Administrador para limpar a Standby List.")
+                    .clicked()
+                {
+                    match crate::sys::memory::purge_standby_list() {
+                        Ok(m) => {
+                            let _ = app.tx.send(AppMsg::Banner { ok: true, text: m });
+                        }
+                        Err(e) => {
+                            let _ = app.tx.send(AppMsg::Banner { ok: false, text: e });
+                        }
+                    }
+                }
+            });
         });
     if cfg_changed {
         match app.watchdog.update_config(cfg) {

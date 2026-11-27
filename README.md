@@ -1,6 +1,6 @@
 # 01LowOS — Otimizador Modular para Windows 11 em Rust
 
-Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL-3.0), para gerenciar, aplicar, verificar e reverter **individualmente** **81 otimizações** de latência, GPU, rede, energia, privacidade e serviços no Windows 11 (`24H2` / `25H2` / `26H1`), com snapshot e backup atômico por ajuste.
+Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL-3.0), para gerenciar, aplicar, verificar e reverter **individualmente** **82 otimizações** de latência, GPU, rede, energia, privacidade e serviços no Windows 11 (`24H2` / `25H2` / `26H1`), com snapshot e backup atômico por ajuste.
 
 - **Download do executável (Releases):** https://github.com/rf2793/01LowOS/releases
 - **Reportar problemas:** https://github.com/rf2793/01LowOS/issues
@@ -8,7 +8,7 @@ Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL
 
 ## Destaques
 
-1. **Melhorias Individuais (81 ajustes granulares)**:
+1. **Melhorias Individuais (82 ajustes granulares)**:
    - Organizadas por categoria (`GPU & Latência`, `Sistema & Kernel`, `Energia`, `Rede`, `Usuário (HKCU)`, `Privacidade & Bloat`, `Serviços Windows`, `Terceiros`, `Tarefas Agendadas`, `ETW Autologgers`).
    - Cada melhoria grava snapshot do estado original em `C:\ProgramData\01LowOS\Backups\tweaks\<id>.json` (ou `%LOCALAPPDATA%\01LowOS\Backups\tweaks\` sem elevação) antes de alterar o sistema.
    - Barra de progresso ao vivo, **Preset Jogos Seguro (1-clique)**, **Selecionar todas**, presets salváveis, tooltips explicativos, botão **Detalhes** e reversão unitária/total (**Reverter** / **Padrão Win**).
@@ -20,8 +20,8 @@ Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL
    - Catálogo embutido (`assets\Aplicativos_01LowOS.json`), detecção automática e verificação por assinatura Authenticode ou SHA-256 antes da instalação silenciosa.
 4. **Orquestrador de Build de ISO**:
    - Inspeciona pré-requisitos locais e acompanha fases de build de ISO customizada apenas sob ação explícita.
-5. **Backups, Relatório & Auto-Teste**:
-   - Reversão unitária ou total, **Exportar Relatório (.txt)** e auto-teste automatizado (`--self-test` / `Executar_AutoTeste_Admin.cmd`).
+5. **Ferramentas Extras & Backups**:
+   - Limpador nativo de **Standby List** (estilo ISLC), gerenciador de **CFG por jogo DX12** (com trava anti-Vanguard `VAN9002`), limpador de **Cache de Shaders** sob demanda, reversão unitária/total, **Exportar Relatório (.txt)** e auto-teste (`--self-test` / `Executar_AutoTeste_Admin.cmd`).
 
 ## Uso via Linha de Comando (CLI)
 

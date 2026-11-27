@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use crate::sys::registry::{RegHive, RegValue};
 use crate::tweaks::advanced::{
     ActionCenterSsoTweak, AmdShaderCacheTweak, AmdUlpsOffTweak, AudioEnhancementsTweak,
-    CloudflareDnsTweak, ConsumerAppxTweak, DefenderGameExclusionsTweak, EdgeBackgroundTweak,
-    EtwAutologgerTweak, FirewallOrphansTweak, GpuNicMsiModeTweak, LegacyHardwareIrqTweak,
-    MemoryCompressionTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak, NvidiaHdcpOffTweak,
-    NvidiaTelemetryTweak, OptionalFeaturesTweak, PnpUnusedDevicesTweak, PresentMonFpsTweak,
-    SmartScreenAclTweak, SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak,
+    BcdCleanTimersTweak, CloudflareDnsTweak, ConsumerAppxTweak, DefenderGameExclusionsTweak,
+    EdgeBackgroundTweak, EtwAutologgerTweak, FirewallOrphansTweak, GpuNicMsiModeTweak,
+    LegacyHardwareIrqTweak, MemoryCompressionTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak,
+    NvidiaHdcpOffTweak, NvidiaTelemetryTweak, OptionalFeaturesTweak, PnpUnusedDevicesTweak,
+    PresentMonFpsTweak, SmartScreenAclTweak, SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak,
     UsbAudioMsiModeTweak, UsbD3SuspendTweak, UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
 };
 use crate::tweaks::network::{
@@ -205,6 +205,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     )));
 
     list.push(Box::new(LegacyHardwareIrqTweak::new()));
+    list.push(Box::new(BcdCleanTimersTweak::new()));
     list.push(Box::new(UsbAudioMsiModeTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -1334,6 +1335,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "sys.audio_enhancements_off",
     "sys.legacy_cleanup_reg",
     "sys.legacy_cleanup_irq",
+    "sys.bcd_clean_timers",
     "sys.msi_mode_usb_audio",
     "sys.fast_startup_off",
     "sys.memory_compression_off",
