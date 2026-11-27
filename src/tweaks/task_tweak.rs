@@ -4,11 +4,41 @@ use crate::sys::backup::BackupStore;
 use crate::sys::cmd::run_powershell_checked;
 use crate::tweaks::{Tweak, TweakMeta, TweakStatus};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct TaskSnapshotEntry {
     path: String,
     name: String,
     enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+struct MatchedTask {
+    entry: TaskSnapshotEntry,
+    stop: bool,
+    optional: bool,
+    writable: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ApplyTaskOutput {
+    #[serde(default)]
+    disabled: Vec<TaskSnapshotEntry>,
+    #[serde(default)]
+    denied: usize,
+    #[serde(default)]
+    warn: Vec<String>,
+    #[serde(default)]
+    fail: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RevertTaskOutput {
+    #[serde(default)]
+    restored: usize,
+    #[serde(default)]
+    skipped: usize,
+    #[serde(default)]
+    fail: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,6 +51,23 @@ pub struct TaskPattern {
 pub struct ScheduledTaskGroupTweak {
     meta: TweakMeta,
     patterns: Vec<TaskPattern>,
+}
+
+fn format_apply_summary(disabled: usize, total_protected: usize, warns: &[String]) -> String {
+    let mut msg = if disabled > 0 {
+        format!("{disabled} tarefa(s) desativada(s).")
+    } else {
+        "Nenhuma tarefa modificável precisou ser desativada.".to_string()
+    };
+    if total_protected > 0 {
+        msg.push_str(&format!(
+            " ({total_protected} protegida(s) por SYSTEM/TrustedInstaller no Windows 11 ignoradas)"
+        ));
+    }
+    if !warns.is_empty() {
+        msg.push_str(&format!(" Avisos: {}", warns.join(" | ")));
+    }
+    msg
 }
 
 impl ScheduledTaskGroupTweak {
@@ -56,22 +103,51 @@ impl ScheduledTaskGroupTweak {
         format!("@({})", items.join(","))
     }
 
-    fn query_matching_tasks(&self) -> Result<Vec<(TaskSnapshotEntry, bool, bool)>, String> {
+    fn query_matching_tasks(&self) -> Result<Vec<MatchedTask>, String> {
         let arr = self.ps_patterns_array();
         let script = format!(
             r#"
 $patterns = {arr}
+$allowedSids = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+$id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+if ($id.User) {{ [void]$allowedSids.Add($id.User.Value) }}
+foreach ($g in $id.Groups) {{ [void]$allowedSids.Add($g.Value) }}
+[void]$allowedSids.Add('S-1-5-32-544')
+$writeMask = 0x50000002
+
 $tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue)
 $out = foreach ($t in $tasks) {{
     $full = $t.TaskPath + $t.TaskName
     $match = $patterns | Where-Object {{ $full -like $_.Pattern }} | Select-Object -First 1
     if ($match) {{
+        $writable = $true
+        if (-not [string]::IsNullOrWhiteSpace($t.SecurityDescriptor)) {{
+            try {{
+                $rsd = New-Object System.Security.AccessControl.RawSecurityDescriptor $t.SecurityDescriptor
+                if ($null -ne $rsd.DiscretionaryAcl) {{
+                    $canWrite = $false
+                    $denied = $false
+                    foreach ($ace in $rsd.DiscretionaryAcl) {{
+                        if ($ace -is [System.Security.AccessControl.CommonAce]) {{
+                            if ($allowedSids.Contains($ace.SecurityIdentifier.Value) -and (($ace.AccessMask -band $writeMask) -ne 0)) {{
+                                if ($ace.AceQualifier -eq 'AccessDenied') {{ $denied = $true }}
+                                elseif ($ace.AceQualifier -eq 'AccessAllowed') {{ $canWrite = $true }}
+                            }}
+                        }}
+                    }}
+                    $writable = ($canWrite -and -not $denied)
+                }}
+            }} catch {{
+                $writable = $true
+            }}
+        }}
         [pscustomobject]@{{
             path = $t.TaskPath
             name = $t.TaskName
             enabled = [bool]$t.Settings.Enabled
             stop = [bool]$match.Stop
             optional = [bool]$match.Optional
+            writable = [bool]$writable
         }}
     }}
 }}
@@ -91,22 +167,26 @@ if ($out) {{ ConvertTo-Json -InputObject @($out) -Compress }} else {{ '[]' }}
             enabled: bool,
             stop: bool,
             optional: bool,
+            #[serde(default = "default_true")]
+            writable: bool,
+        }
+        fn default_true() -> bool {
+            true
         }
 
         let rows: Vec<RawRow> = serde_json::from_str(json_str)
             .map_err(|e| format!("Falha ao interpretar tarefas ({e}): {json_str}"))?;
         Ok(rows
             .into_iter()
-            .map(|r| {
-                (
-                    TaskSnapshotEntry {
-                        path: r.path,
-                        name: r.name,
-                        enabled: r.enabled,
-                    },
-                    r.stop,
-                    r.optional,
-                )
+            .map(|r| MatchedTask {
+                entry: TaskSnapshotEntry {
+                    path: r.path,
+                    name: r.name,
+                    enabled: r.enabled,
+                },
+                stop: r.stop,
+                optional: r.optional,
+                writable: r.writable,
             })
             .collect())
     }
@@ -125,8 +205,23 @@ impl Tweak for ScheduledTaskGroupTweak {
         if tasks.is_empty() {
             return TweakStatus::NotApplicable("Nenhuma tarefa correspondente encontrada".into());
         }
-        let disabled = tasks.iter().filter(|(t, _, _)| !t.enabled).count();
-        let total = tasks.len();
+        let modifiable: Vec<&MatchedTask> = tasks.iter().filter(|t| t.writable).collect();
+        let protected_enabled = tasks
+            .iter()
+            .filter(|t| !t.writable && t.entry.enabled)
+            .count();
+
+        if modifiable.is_empty() {
+            if protected_enabled > 0 {
+                return TweakStatus::NotApplicable(format!(
+                    "{protected_enabled} tarefa(s) protegida(s) por SYSTEM/TrustedInstaller no Windows 11"
+                ));
+            }
+            return TweakStatus::Applied;
+        }
+
+        let disabled = modifiable.iter().filter(|t| !t.entry.enabled).count();
+        let total = modifiable.len();
         if disabled == total {
             TweakStatus::Applied
         } else if disabled == 0 {
@@ -142,67 +237,94 @@ impl Tweak for ScheduledTaskGroupTweak {
             return Ok("Nenhuma tarefa correspondente instalada.".into());
         }
 
+        let protected_enabled = tasks
+            .iter()
+            .filter(|t| t.entry.enabled && !t.writable)
+            .count();
+
         let items: Vec<String> = tasks
             .iter()
-            .filter(|(e, _, _)| e.enabled)
-            .map(|(e, stop, opt)| {
+            .filter(|t| t.entry.enabled && t.writable)
+            .map(|t| {
                 format!(
                     "@{{P='{}';N='{}';Stop={};Opt={}}}",
-                    e.path.replace('\'', "''"),
-                    e.name.replace('\'', "''"),
-                    if *stop { "$true" } else { "$false" },
-                    if *opt { "$true" } else { "$false" }
+                    t.entry.path.replace('\'', "''"),
+                    t.entry.name.replace('\'', "''"),
+                    if t.stop { "$true" } else { "$false" },
+                    if t.optional { "$true" } else { "$false" }
                 )
             })
             .collect();
 
         if items.is_empty() {
+            if protected_enabled > 0 {
+                return Ok(format!(
+                    "Todas as tarefas modificáveis já estavam desativadas ({protected_enabled} protegida(s) por SYSTEM/TrustedInstaller ignoradas)."
+                ));
+            }
             return Ok(format!(
                 "Todas as {} tarefas já estavam desativadas.",
                 tasks.len()
             ));
         }
 
-        let snapshot: Vec<TaskSnapshotEntry> = tasks.iter().map(|(e, _, _)| e.clone()).collect();
-        let json = serde_json::to_value(&snapshot)
-            .map_err(|e| format!("Falha ao serializar tarefas: {e}"))?;
-        let created_backup = backups.save_if_absent(self.meta.id, json)?;
-
         let script = format!(
             r#"
 $list = @({items})
-$fail = @()
-$warn = @()
-$ok = 0
+$disabled = [System.Collections.Generic.List[object]]::new()
+$warn = [System.Collections.Generic.List[string]]::new()
+$fail = [System.Collections.Generic.List[string]]::new()
+$denied = 0
 foreach ($x in $list) {{
     try {{
         if ($x.Stop) {{ Stop-ScheduledTask -TaskPath $x.P -TaskName $x.N -ErrorAction SilentlyContinue }}
         Disable-ScheduledTask -TaskPath $x.P -TaskName $x.N -ErrorAction Stop | Out-Null
-        $ok++
+        $disabled.Add([pscustomobject]@{{ path = $x.P; name = $x.N; enabled = $true }})
     }} catch {{
-        if ($x.Opt) {{ $warn += "$($x.N): $($_.Exception.Message)" }}
-        else {{ $fail += "$($x.N): $($_.Exception.Message)" }}
+        $msg = $_.Exception.Message
+        $isAccessDenied = ($msg -match 'Acesso negado|Access is denied|0x80070005') -or ($_.CategoryInfo.Category -eq 'PermissionDenied')
+        if ($x.Opt) {{
+            if ($isAccessDenied) {{ $denied++ }}
+            else {{ $warn.Add("$($x.N): $msg") }}
+        }} else {{
+            $fail.Add("$($x.N): $msg")
+        }}
     }}
 }}
-if ($fail.Count) {{ throw ($fail -join '; ') }}
-Write-Output ("OK=$ok WARN=" + ($warn -join ' | '))
+[pscustomobject]@{{
+    disabled = $disabled.ToArray()
+    denied = $denied
+    warn = $warn.ToArray()
+    fail = $fail.ToArray()
+}} | ConvertTo-Json -Depth 4 -Compress
 "#,
             items = items.join(",")
         );
 
-        match run_powershell_checked(&script) {
-            Ok(out) => Ok(format!(
-                "Tarefas processadas ({}). {}",
-                items.len(),
-                out.stdout.trim()
-            )),
-            Err(e) => {
-                if created_backup {
-                    let _ = backups.remove(self.meta.id);
-                }
-                Err(e)
-            }
+        let res = run_powershell_checked(&script)?;
+        let out: ApplyTaskOutput = serde_json::from_str(res.stdout.trim()).map_err(|e| {
+            format!(
+                "Falha ao interpretar resultado das tarefas ({e}): {}",
+                res.stdout.trim()
+            )
+        })?;
+
+        if !out.disabled.is_empty() {
+            let json = serde_json::to_value(&out.disabled)
+                .map_err(|e| format!("Falha ao serializar tarefas: {e}"))?;
+            let _ = backups.save_if_absent(self.meta.id, json)?;
         }
+
+        if !out.fail.is_empty() {
+            return Err(out.fail.join("; "));
+        }
+
+        let total_protected = protected_enabled + out.denied;
+        Ok(format_apply_summary(
+            out.disabled.len(),
+            total_protected,
+            &out.warn,
+        ))
     }
 
     fn revert(&self, backups: &BackupStore) -> Result<String, String> {
@@ -228,25 +350,109 @@ Write-Output ("OK=$ok WARN=" + ($warn -join ' | '))
             let script = format!(
                 r#"
 $list = @({items})
-$fail = @()
+$restored = 0
+$skipped = 0
+$fail = [System.Collections.Generic.List[string]]::new()
 foreach ($x in $list) {{
     try {{
+        $cur = Get-ScheduledTask -TaskPath $x.P -TaskName $x.N -ErrorAction SilentlyContinue
+        if ($null -eq $cur -or ([bool]$cur.Settings.Enabled -eq [bool]$x.En)) {{
+            $skipped++
+            continue
+        }}
         if ($x.En) {{ Enable-ScheduledTask -TaskPath $x.P -TaskName $x.N -ErrorAction Stop | Out-Null }}
         else {{ Disable-ScheduledTask -TaskPath $x.P -TaskName $x.N -ErrorAction Stop | Out-Null }}
+        $restored++
     }} catch {{
-        $fail += "$($x.N): $($_.Exception.Message)"
+        $fail.Add("$($x.N): $($_.Exception.Message)")
     }}
 }}
-if ($fail.Count) {{ Write-Warning ($fail -join '; ') }}
+[pscustomobject]@{{
+    restored = $restored
+    skipped = $skipped
+    fail = $fail.ToArray()
+}} | ConvertTo-Json -Depth 4 -Compress
 "#,
                 items = items.join(",")
             );
-            run_powershell_checked(&script)?;
+            let res = run_powershell_checked(&script)?;
+            let out: RevertTaskOutput = serde_json::from_str(res.stdout.trim()).map_err(|e| {
+                format!(
+                    "Falha ao interpretar restauração das tarefas ({e}): {}",
+                    res.stdout.trim()
+                )
+            })?;
+            if !out.fail.is_empty() && out.restored == 0 {
+                return Err(out.fail.join("; "));
+            }
+            backups.remove(self.meta.id)?;
+            if out.fail.is_empty() {
+                if out.skipped > 0 {
+                    return Ok(format!(
+                        "{} tarefa(s) restaurada(s) ao estado original ({} já no estado original ou inexistente(s)).",
+                        out.restored, out.skipped
+                    ));
+                }
+                return Ok(format!(
+                    "{} tarefa(s) restaurada(s) ao estado original.",
+                    out.restored
+                ));
+            }
+            return Ok(format!(
+                "{} tarefa(s) restaurada(s); {} aviso(s): {}",
+                out.restored,
+                out.fail.len(),
+                out.fail.join(" | ")
+            ));
         }
         backups.remove(self.meta.id)?;
         Ok(format!(
             "{} tarefa(s) restaurada(s) ao estado original.",
             snapshot.len()
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_apply_summary_handles_protected_and_disabled() {
+        assert_eq!(
+            format_apply_summary(3, 33, &[]),
+            "3 tarefa(s) desativada(s). (33 protegida(s) por SYSTEM/TrustedInstaller no Windows 11 ignoradas)"
+        );
+        assert_eq!(
+            format_apply_summary(0, 5, &[]),
+            "Nenhuma tarefa modificável precisou ser desativada. (5 protegida(s) por SYSTEM/TrustedInstaller no Windows 11 ignoradas)"
+        );
+        assert_eq!(
+            format_apply_summary(2, 0, &["TaskX: erro".to_string()]),
+            "2 tarefa(s) desativada(s). Avisos: TaskX: erro"
+        );
+    }
+
+    #[test]
+    fn apply_task_output_deserializes_empty_single_and_multiple() {
+        let empty: ApplyTaskOutput =
+            serde_json::from_str(r#"{"disabled":[],"denied":33,"warn":[],"fail":[]}"#).unwrap();
+        assert!(empty.disabled.is_empty());
+        assert_eq!(empty.denied, 33);
+
+        let single: ApplyTaskOutput = serde_json::from_str(
+            r#"{"disabled":[{"path":"\\Microsoft\\Windows\\","name":"T1","enabled":true}],"denied":0,"warn":[],"fail":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(single.disabled.len(), 1);
+        assert_eq!(single.disabled[0].name, "T1");
+
+        let multi: ApplyTaskOutput = serde_json::from_str(
+            r#"{"disabled":[{"path":"\\A\\","name":"T1","enabled":true},{"path":"\\B\\","name":"T2","enabled":true}],"denied":2,"warn":["w1"],"fail":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(multi.disabled.len(), 2);
+        assert_eq!(multi.denied, 2);
+        assert_eq!(multi.warn, vec!["w1"]);
     }
 }

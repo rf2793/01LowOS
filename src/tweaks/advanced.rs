@@ -4765,6 +4765,8 @@ $p = Get-MpPreference -ErrorAction Stop
     }
 }
 
+const RESERVE_MANAGER_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager";
+
 pub struct ReservedStorageOffTweak {
     meta: TweakMeta,
 }
@@ -4784,6 +4786,25 @@ impl ReservedStorageOffTweak {
                     "Set-WindowsReservedStorageState -State Disabled (libera ~7-12 GB; reversível via -State Enabled)".into(),
                 ],
             },
+        }
+    }
+
+    fn active_scenario() -> u32 {
+        match read_value(RegHive::Hklm, RESERVE_MANAGER_KEY, "ActiveScenario") {
+            Ok(Some(RegValue::DWord(v))) => v,
+            _ => 0,
+        }
+    }
+
+    fn format_reserved_storage_err(err: String) -> String {
+        let lower = err.to_lowercase();
+        if lower.contains("0x800f0975")
+            || lower.contains("armazenamento reservado está em uso")
+            || lower.contains("reserved storage is in use")
+        {
+            "Armazenamento Reservado está em uso pelo Windows Update/manutenção (erro 0x800f0975). Conclua ou pause as atualizações pendentes no Windows Update, reinicie o PC e tente novamente.".into()
+        } else {
+            err
         }
     }
 }
@@ -4813,7 +4834,14 @@ Write-Output "$($st.State)"
                 } else if s.eq_ignore_ascii_case("Disabled") {
                     TweakStatus::Applied
                 } else if s.eq_ignore_ascii_case("Enabled") {
-                    TweakStatus::NotApplied
+                    let scenario = Self::active_scenario();
+                    if scenario != 0 {
+                        TweakStatus::NotApplicable(format!(
+                            "Em uso pelo Windows Update (ActiveScenario={scenario}) — conclua/pause atualizações e reinicie o PC"
+                        ))
+                    } else {
+                        TweakStatus::NotApplied
+                    }
                 } else {
                     TweakStatus::Error(s.to_string())
                 }
@@ -4835,6 +4863,12 @@ Write-Output "$($st.State)"
         if state.eq_ignore_ascii_case("Disabled") {
             return Ok("Armazenamento Reservado do Windows já está desativado.".into());
         }
+        let scenario = Self::active_scenario();
+        if scenario != 0 {
+            return Err(format!(
+                "Armazenamento Reservado está em uso pelo Windows Update/manutenção (ActiveScenario={scenario}, erro 0x800f0975). Conclua ou pause as atualizações pendentes no Windows Update, reinicie o PC e tente aplicar novamente."
+            ));
+        }
         let created = backups.save_if_absent(
             self.meta.id,
             serde_json::json!({ "was_enabled": true }),
@@ -4845,7 +4879,7 @@ Write-Output "$($st.State)"
             if created {
                 let _ = backups.remove(self.meta.id);
             }
-            return Err(e);
+            return Err(Self::format_reserved_storage_err(e));
         }
         Ok("Armazenamento Reservado do Windows desativado (~7–12 GB liberados).".into())
     }
@@ -4857,7 +4891,8 @@ Write-Output "$($st.State)"
         if rec.data["was_enabled"].as_bool().unwrap_or(true) {
             run_powershell_checked(
                 "Set-WindowsReservedStorageState -State Enabled -ErrorAction Stop | Out-Null",
-            )?;
+            )
+            .map_err(Self::format_reserved_storage_err)?;
         }
         backups.remove(self.meta.id)?;
         Ok("Armazenamento Reservado do Windows restaurado.".into())
@@ -4870,7 +4905,8 @@ Write-Output "$($st.State)"
     fn reset_to_default(&self) -> Result<String, String> {
         run_powershell_checked(
             "Set-WindowsReservedStorageState -State Enabled -ErrorAction Stop | Out-Null",
-        )?;
+        )
+        .map_err(Self::format_reserved_storage_err)?;
         Ok("Armazenamento Reservado do Windows restaurado ao padrão (Enabled).".into())
     }
 }
@@ -5114,5 +5150,22 @@ impl Tweak for AmdDeepSleepAspmOffTweak {
             delete_value(RegHive::Hklm, &k, "EnableAspm")?;
         }
         Ok("PP_SclkDeepSleepDisable e EnableAspm removidos (padrão AMD).".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ReservedStorageOffTweak;
+
+    #[test]
+    fn format_reserved_storage_err_maps_0x800f0975_and_preserves_other_errors() {
+        let pt = ReservedStorageOffTweak::format_reserved_storage_err(
+            "PowerShell falhou (código 1): Set-WindowsReservedStorageState : Código do erro = 0x800f0975".into(),
+        );
+        assert!(pt.contains("0x800f0975"));
+        assert!(pt.contains("Windows Update"));
+
+        let other = ReservedStorageOffTweak::format_reserved_storage_err("Outro erro qualquer".into());
+        assert_eq!(other, "Outro erro qualquer");
     }
 }

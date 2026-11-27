@@ -1818,7 +1818,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             risk: RiskLevel::Low,
             requires_reboot: false,
             requires_admin: true,
-            description: "Desativa tarefas agendadas de telemetria, CEIP, UpdateOrchestrator, manutenção em segundo plano (WinSAT, Defrag/Retrim preservado) e uso de dados.",
+            description: "Desativa tarefas agendadas de telemetria, CEIP, UpdateOrchestrator, manutenção em segundo plano (WinSAT, Defrag/Retrim preservado) e uso de dados. Tarefas protegidas por SYSTEM/TrustedInstaller no Windows 11 24H2+ são detectadas via ACL/SDDL e ignoradas sem erro.",
             details: vec![],
         },
         win_task_patterns
