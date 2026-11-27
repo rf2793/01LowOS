@@ -2,16 +2,17 @@ use std::collections::HashSet;
 
 use crate::sys::registry::{RegHive, RegValue};
 use crate::tweaks::advanced::{
-    ActionCenterSsoTweak, AmdShaderCacheTweak, AudioEnhancementsTweak, CloudflareDnsTweak,
-    ConsumerAppxTweak, DefenderGameExclusionsTweak, EdgeBackgroundTweak, EtwAutologgerTweak,
-    FirewallOrphansTweak, GpuNicMsiModeTweak, LegacyHardwareIrqTweak, MemoryCompressionTweak,
-    NicPowerMgmtTweak, NvidiaDynamicPstateTweak, NvidiaHdcpOffTweak, NvidiaTelemetryTweak,
-    OptionalFeaturesTweak, PnpUnusedDevicesTweak, PresentMonFpsTweak, SmartScreenAclTweak,
-    SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak, UsbAudioMsiModeTweak,
-    UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
+    ActionCenterSsoTweak, AmdShaderCacheTweak, AmdUlpsOffTweak, AudioEnhancementsTweak,
+    CloudflareDnsTweak, ConsumerAppxTweak, DefenderGameExclusionsTweak, EdgeBackgroundTweak,
+    EtwAutologgerTweak, FirewallOrphansTweak, GpuNicMsiModeTweak, LegacyHardwareIrqTweak,
+    MemoryCompressionTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak, NvidiaHdcpOffTweak,
+    NvidiaTelemetryTweak, OptionalFeaturesTweak, PnpUnusedDevicesTweak, PresentMonFpsTweak,
+    SmartScreenAclTweak, SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak,
+    UsbAudioMsiModeTweak, UsbD3SuspendTweak, UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
 };
 use crate::tweaks::network::{
-    NetRscUdpLatencyTweak, NicBindingsTweak, NicRssTweak, NicWolEeeTweak, WinInetWpadTweak,
+    NetQosNicFlowTweak, NetRscUdpLatencyTweak, NicBindingsTweak, NicRssTweak, NicWolEeeTweak,
+    WinInetWpadTweak,
 };
 use crate::tweaks::power::{DeviceWakeTweak, PowerPlanTweak};
 use crate::tweaks::registry_tweak::{RegOp, RegistryTweak};
@@ -27,7 +28,7 @@ fn sz(v: &str) -> RegValue {
 }
 
 pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
-    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(80);
+    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(84);
 
     // 1. GPU & LATÊNCIA
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -155,6 +156,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     )));
 
     list.push(Box::new(AmdShaderCacheTweak::new()));
+    list.push(Box::new(AmdUlpsOffTweak::new()));
     list.push(Box::new(PresentMonFpsTweak::new()));
     list.push(Box::new(GpuNicMsiModeTweak::new()));
     list.push(Box::new(NvidiaTelemetryTweak::new()));
@@ -455,6 +457,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(DeviceWakeTweak::new()));
     list.push(Box::new(UsbDevicePowerMgmtTweak::new()));
     list.push(Box::new(UsbHubPowerMgmtTweak::new()));
+    list.push(Box::new(UsbD3SuspendTweak::new()));
 
     // 4. REDE
     list.push(Box::new(NicRssTweak::new()));
@@ -463,6 +466,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(NicBindingsTweak::new()));
     list.push(Box::new(TcpNagleTweak::new()));
     list.push(Box::new(NetRscUdpLatencyTweak::new()));
+    list.push(Box::new(NetQosNicFlowTweak::new()));
     list.push(Box::new(CloudflareDnsTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -846,6 +850,37 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{e2bf9676-5f8f-435c-97eb-11607a5bedf7}", sz("")),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}", sz("")),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{09A47860-11B0-4DA5-AFA5-26D86198A780}", sz("")),
+        ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "bloat.maintenance_background_off",
+            name: "Manutenção Automática, Storage Sense, CrossDevice, AppPrivacy e SRUM OFF",
+            category: Category::PrivacyBloat,
+            risk: RiskLevel::Low,
+            requires_reboot: true,
+            requires_admin: true,
+            description: "Desativa Manutenção Automática em 2º plano, Storage Sense, bloqueio global de apps UWP em 2º plano (LetAppsRunInBackground=2), CrossDevice Resume, amostragem de energia SRUM (EnergyEstimationEnabled=0) e atraso de logon.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\Maintenance", "MaintenanceDisabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy", "01", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsRunInBackground", dw(2)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CrossDeviceResume\Configuration", "IsResumeAllowed", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Power", "EnergyEstimationEnabled", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize", "StartupDelayInMSec", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableFirstLogonAnimation", dw(0)),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\Maintenance", "MaintenanceDisabled"),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy", "01", dw(1)),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsRunInBackground"),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CrossDeviceResume\Configuration", "IsResumeAllowed", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Power", "EnergyEstimationEnabled", dw(1)),
+            RegOp::delete(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize", "StartupDelayInMSec"),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableFirstLogonAnimation", dw(1)),
         ],
     )));
 
@@ -1315,11 +1350,13 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "power.device_wake_off",
     "power.usb_device_pm_off",
     "power.usb_hub_pm_off",
+    "power.usb_d3_suspend_off",
     "net.wol_eee_off",
     "net.nic_power_mgmt_off",
     "net.llmnr_mdns_wpad_off",
     "net.wininet_wpad_off",
     "net.rsc_udp_latency",
+    "net.qos_nic_flow_off",
     "user.mouse_raw",
     "user.keyboard_accessibility",
     "user.visual_perf",
@@ -1328,6 +1365,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "user.privacy_hkcu",
     "bloat.ai_search_cloud",
     "bloat.edge_background_off",
+    "bloat.maintenance_background_off",
     "bloat.actioncenter_sso",
     "tasks.windows_bloat",
     "tasks.legacy_cleanup",

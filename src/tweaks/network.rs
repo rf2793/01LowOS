@@ -172,7 +172,7 @@ foreach ($a in $rows) {{
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct WolEntry {
     nic: String,
     key: String,
@@ -810,5 +810,204 @@ Get-NetAdapter -Physical -ErrorAction SilentlyContinue | ForEach-Object {
         run_powershell_checked(script)?;
         delete_value(RegHive::Hklm, AFD_PARAMS_KEY, "FastSendDatagramThreshold")?;
         Ok("RSC, Packet Coalescing e AFD restaurados para o padrão do Windows.".into())
+    }
+}
+
+const PSCHED_KEY: &str = r"SOFTWARE\Policies\Microsoft\Windows\Psched";
+const QOS_NIC_PROPS: &[&str] = &["*FlowControl", "*PMARPOffload", "*PMNSOffload"];
+
+#[derive(Debug, Serialize, Deserialize)]
+struct QosNicFlowBackup {
+    qos_existed: bool,
+    qos_val: Option<RegValue>,
+    nic_props: Vec<WolEntry>,
+}
+
+pub struct NetQosNicFlowTweak {
+    meta: TweakMeta,
+}
+
+impl NetQosNicFlowTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "net.qos_nic_flow_off",
+                name: "Rede: Remover limite QoS (20%) e desativar Flow Control / Offloads ARP-NS",
+                category: Category::Network,
+                risk: RiskLevel::Low,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Define Psched\\NonBestEffortLimit=0 (remove a reserva padrão de 20% de banda do Packet Scheduler) e desativa *FlowControl, *PMARPOffload e *PMNSOffload nos adaptadores físicos para evitar quadros PAUSE e offloads de suspensão.",
+                details: vec![
+                    format!(r"HKLM\{PSCHED_KEY}\NonBestEffortLimit = 0"),
+                    "Adaptadores físicos: *FlowControl = 0, *PMARPOffload = 0, *PMNSOffload = 0".into(),
+                ],
+            },
+        }
+    }
+}
+
+impl Tweak for NetQosNicFlowTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let qos_ok = usize::from(matches!(
+            read_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit"),
+            Ok(Some(RegValue::DWord(0)))
+        ));
+        let keywords = QOS_NIC_PROPS
+            .iter()
+            .map(|k| format!("'{k}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let script = format!(
+            r#"
+$keys = @({keywords})
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue)
+$total = 0; $zero = 0
+foreach ($n in $nics) {{
+    foreach ($k in $keys) {{
+        $p = Get-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword $k -ErrorAction SilentlyContinue
+        if ($p -and (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0')) {{
+            $total++
+            if ([string]@($p.RegistryValue)[0] -eq '0') {{ $zero++ }}
+        }}
+    }}
+}}
+Write-Output "$zero/$total"
+"#
+        );
+        match run_powershell_checked(&script) {
+            Ok(out) => {
+                if let Some((a, b)) = out.stdout.trim().split_once('/') {
+                    let nic_ok: usize = a.parse().unwrap_or(0);
+                    let nic_total: usize = b.parse().unwrap_or(0);
+                    let ok = qos_ok + nic_ok;
+                    let total = 1 + nic_total;
+                    if ok == total {
+                        TweakStatus::Applied
+                    } else if ok == 0 {
+                        TweakStatus::NotApplied
+                    } else {
+                        TweakStatus::Partial(format!("{ok}/{total} ajustes"))
+                    }
+                } else {
+                    TweakStatus::Error(out.stdout)
+                }
+            }
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let cur_qos = read_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit")?;
+        let keywords = QOS_NIC_PROPS
+            .iter()
+            .map(|k| format!("'{k}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let query = format!(
+            r#"
+$keys = @({keywords})
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue)
+$rows = foreach ($n in $nics) {{
+    foreach ($k in $keys) {{
+        $p = Get-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword $k -ErrorAction SilentlyContinue
+        if ($p -and (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0')) {{
+            $cur = [string]@($p.RegistryValue)[0]
+            if ($cur -ne '0') {{ [pscustomobject]@{{ nic=$n.Name; key=$k; val=$cur }} }}
+        }}
+    }}
+}}
+if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
+"#
+        );
+        let out = run_powershell_checked(&query)?;
+        let nic_rows: Vec<WolEntry> =
+            serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
+        let snap = QosNicFlowBackup {
+            qos_existed: cur_qos.is_some(),
+            qos_val: cur_qos,
+            nic_props: nic_rows.clone(),
+        };
+        let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        if let Err(e) = write_value(
+            RegHive::Hklm,
+            PSCHED_KEY,
+            "NonBestEffortLimit",
+            &RegValue::DWord(0),
+        ) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
+
+        if !nic_rows.is_empty() {
+            let escaped = serde_json::to_string(&nic_rows)
+                .map_err(|e| e.to_string())?
+                .replace('\'', "''");
+            let apply_script = format!(
+                r#"
+$rows = @((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }})
+foreach ($r in $rows) {{
+    Set-NetAdapterAdvancedProperty -Name $r.nic -RegistryKeyword $r.key -RegistryValue 0 -NoRestart -ErrorAction Stop
+}}
+"#
+            );
+            run_powershell_checked(&apply_script)?;
+        }
+        Ok(format!(
+            "QoS NonBestEffortLimit=0 aplicado; {} propriedade(s) de Flow/Offload desativada(s).",
+            nic_rows.len()
+        ))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de QoS/Flow Control encontrado.".into());
+        };
+        let snap: QosNicFlowBackup =
+            serde_json::from_value(rec.data).map_err(|e| format!("Backup inválido: {e}"))?;
+        if snap.qos_existed {
+            if let Some(v) = &snap.qos_val {
+                write_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit", v)?;
+            }
+        } else {
+            delete_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit")?;
+        }
+        if !snap.nic_props.is_empty() {
+            let escaped = serde_json::to_string(&snap.nic_props)
+                .map_err(|e| e.to_string())?
+                .replace('\'', "''");
+            let script = format!(
+                r#"
+$rows = @((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }})
+foreach ($r in $rows) {{
+    if (-not $r.key) {{ continue }}
+    Set-NetAdapterAdvancedProperty -Name $r.nic -RegistryKeyword $r.key -RegistryValue $r.val -NoRestart -ErrorAction Stop
+}}
+"#
+            );
+            run_powershell_checked(&script)?;
+        }
+        backups.remove(self.meta.id)?;
+        Ok(format!(
+            "QoS e {} propriedade(s) da placa de rede restaurada(s).",
+            snap.nic_props.len()
+        ))
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        delete_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit")?;
+        Ok("Política NonBestEffortLimit removida (padrão do Windows).".into())
     }
 }

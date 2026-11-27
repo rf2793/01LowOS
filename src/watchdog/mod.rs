@@ -49,6 +49,15 @@ pub const IDLE_BG: &[&str] = &[
     "MSIAfterburner",
     "rzappengine",
     "RazerAppEngine",
+    "OneDrive",
+    "Blitz",
+    "Overwolf",
+    "OverwolfBrowser",
+    "chrome",
+    "msedge",
+    "brave",
+    "opera",
+    "firefox",
 ];
 
 pub const BELOW_NORMAL_BG: &[&str] = &["EALocalHostSvc", "Discord", "Spotify"];
@@ -108,6 +117,11 @@ pub const NEVER_TOUCH: &[&str] = &[
     "FACEITService",
     "FACEIT",
     "01LowOS",
+    "ExitLag",
+    "ExitLagPmService",
+    "NoPing",
+    "GearUP",
+    "VirtualDesktop.Streamer",
 ];
 
 const IGNORED_LIBRARY_TOOLS: &[&str] = &[
@@ -864,7 +878,9 @@ mod tests {
         assert_eq!(classify_process("steamwebhelper"), ProcRole::IdleBg);
         assert_eq!(classify_process("dwm"), ProcRole::ProtectedCore0);
         assert_eq!(classify_process("audiodg"), ProcRole::ProtectedCore0);
-        assert_eq!(classify_process("chrome"), ProcRole::CommonOther);
+        assert_eq!(classify_process("chrome"), ProcRole::IdleBg);
+        assert_eq!(classify_process("ExitLag"), ProcRole::NeverTouch);
+        assert_eq!(classify_process("notepad"), ProcRole::CommonOther);
     }
 
     #[test]

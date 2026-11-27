@@ -2425,6 +2425,9 @@ const CONSUMER_APPX_LIST: &[&str] = &[
     "Microsoft.People",
     "Microsoft.549981C3F5F10",
     "Microsoft.WindowsMaps",
+    "MicrosoftWindows.CrossDevice",
+    "Microsoft.WidgetsPlatformRuntime",
+    "Microsoft.XboxSpeechToTextOverlay",
 ];
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2525,7 +2528,7 @@ if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
         let rows: Vec<ConsumerAppxEntry> =
             serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
         if rows.is_empty() {
-            return Ok("Nenhum dos 21 apps bloatware de consumo está instalado.".into());
+            return Ok("Nenhum dos 24 apps bloatware de consumo está instalado.".into());
         }
         let json = serde_json::to_value(&rows).map_err(|e| e.to_string())?;
         let created = backups.save_if_absent(self.meta.id, json)?;
@@ -3759,5 +3762,295 @@ if ($paths.Count) {{ Remove-MpPreference -ExclusionPath $paths -ErrorAction Sile
             "{} exclusão(ões) do Defender removida(s).",
             paths.len()
         ))
+    }
+}
+
+const USB_D3_FLAGS: &[&str] = &[
+    "AllowIdleIrpInD3",
+    "DeviceSelectiveSuspended",
+    "SelectiveSuspendEnabled",
+    "SelectiveSuspendOn",
+];
+
+pub struct UsbD3SuspendTweak {
+    meta: TweakMeta,
+}
+
+impl UsbD3SuspendTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "power.usb_d3_suspend_off",
+                name: "USB: Desativar suspensão profunda D3 (AllowIdleIrpInD3 / DeviceSelectiveSuspended)",
+                category: Category::Power,
+                risk: RiskLevel::Low,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Zera AllowIdleIrpInD3, DeviceSelectiveSuspended, SelectiveSuspendEnabled e SelectiveSuspendOn em Enum\\USB\\*\\*\\Device Parameters onde já existem (preservando o tipo DWORD/Binary original), impedindo que mouses 1000–8000 Hz, teclados e DACs USB entrem em estado ocioso D3.",
+                details: vec![
+                    r"Escaneia Enum\USB\*\*\Device Parameters para AllowIdleIrpInD3, DeviceSelectiveSuspended, SelectiveSuspendEnabled e SelectiveSuspendOn".into(),
+                    "Define 0 preservando o tipo original (DWORD ou Binary 1 byte)".into(),
+                ],
+            },
+        }
+    }
+
+    fn scan_targets() -> Vec<(String, String, RegValue)> {
+        let mut out = Vec::new();
+        for dev in list_subkeys(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Enum\USB") {
+            let dev_path = format!(r"SYSTEM\CurrentControlSet\Enum\USB\{dev}");
+            for inst in list_subkeys(RegHive::Hklm, &dev_path) {
+                let dp = format!(r"{dev_path}\{inst}\Device Parameters");
+                for &flag in USB_D3_FLAGS {
+                    match read_value(RegHive::Hklm, &dp, flag) {
+                        Ok(Some(v @ RegValue::DWord(_))) => out.push((dp.clone(), flag.into(), v)),
+                        Ok(Some(RegValue::Binary(b))) if b.len() == 1 => {
+                            out.push((dp.clone(), flag.into(), RegValue::Binary(b)))
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn is_zero(val: &RegValue) -> bool {
+        match val {
+            RegValue::DWord(0) => true,
+            RegValue::Binary(b) if b.len() == 1 && b[0] == 0 => true,
+            _ => false,
+        }
+    }
+
+    fn zero_for(val: &RegValue) -> RegValue {
+        match val {
+            RegValue::Binary(_) => RegValue::Binary(vec![0]),
+            _ => RegValue::DWord(0),
+        }
+    }
+
+    fn one_for(val: &RegValue) -> RegValue {
+        match val {
+            RegValue::Binary(_) => RegValue::Binary(vec![1]),
+            _ => RegValue::DWord(1),
+        }
+    }
+}
+
+impl Tweak for UsbD3SuspendTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let targets = Self::scan_targets();
+        if targets.is_empty() {
+            return TweakStatus::NotApplicable("Nenhuma chave de suspensão D3 USB encontrada".into());
+        }
+        let off = targets.iter().filter(|(_, _, v)| Self::is_zero(v)).count();
+        if off == targets.len() {
+            TweakStatus::Applied
+        } else if off == 0 {
+            TweakStatus::NotApplied
+        } else {
+            TweakStatus::Partial(format!("{off}/{} chaves", targets.len()))
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let targets = Self::scan_targets();
+        if targets.is_empty() {
+            return Ok("Nenhuma chave de suspensão D3 USB encontrada.".into());
+        }
+        let mut snap = Vec::with_capacity(targets.len());
+        for (sk, name, val) in &targets {
+            snap.push(RegSnapshotEntry {
+                hive: RegHive::Hklm,
+                subkey: sk.clone(),
+                name: name.clone(),
+                existed: true,
+                value: Some(val.clone()),
+                use_backup_restore: true,
+            });
+        }
+        let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        for (modified, (sk, name, val)) in targets.iter().enumerate() {
+            if let Err(e) =
+                write_value_backup_restore(RegHive::Hklm, sk, name, &Self::zero_for(val))
+            {
+                if created && modified == 0 {
+                    let _ = backups.remove(self.meta.id);
+                }
+                return Err(e);
+            }
+        }
+        Ok(format!(
+            "Suspensão D3 desativada em {} entrada(s) USB.",
+            targets.len()
+        ))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de suspensão D3 USB encontrado.".into());
+        };
+        let snap: Vec<RegSnapshotEntry> =
+            serde_json::from_value(rec.data).map_err(|e| e.to_string())?;
+        for e in &snap {
+            if e.existed {
+                if let Some(v) = &e.value {
+                    write_value_backup_restore(e.hive, &e.subkey, &e.name, v)?;
+                }
+            }
+        }
+        backups.remove(self.meta.id)?;
+        Ok(format!("{} entrada(s) D3 USB restaurada(s).", snap.len()))
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        let targets = Self::scan_targets();
+        for (sk, name, val) in &targets {
+            write_value_backup_restore(RegHive::Hklm, sk, name, &Self::one_for(val))?;
+        }
+        Ok(format!(
+            "{} entrada(s) D3 USB definidas para padrão (1).",
+            targets.len()
+        ))
+    }
+}
+
+pub struct AmdUlpsOffTweak {
+    meta: TweakMeta,
+}
+
+impl AmdUlpsOffTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "gpu.amd_ulps_off",
+                name: "GPU AMD: Desativar ULPS (Ultra Low Power State)",
+                category: Category::GpuLatency,
+                risk: RiskLevel::Low,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Define EnableUlps=0 para GPUs AMD Radeon (VEN_1002), evitando quedas profundas de clock/tensão e micro-stutters de rampa. Marca automaticamente como N/A em PCs NVIDIA.",
+                details: vec![
+                    format!(r"HKLM\{GPU_CLASS_KEY}\00xx\EnableUlps = 0 (VEN_1002)"),
+                ],
+            },
+        }
+    }
+
+    fn amd_keys() -> Vec<String> {
+        let mut res = Vec::new();
+        for sub in list_subkeys(RegHive::Hklm, GPU_CLASS_KEY) {
+            if sub.len() != 4 || !sub.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let dev_key = format!(r"{GPU_CLASS_KEY}\{sub}");
+            if let Ok(Some(RegValue::String(id))) =
+                read_value(RegHive::Hklm, &dev_key, "MatchingDeviceId")
+            {
+                if id.to_ascii_uppercase().contains("VEN_1002") {
+                    res.push(dev_key);
+                }
+            }
+        }
+        res
+    }
+}
+
+impl Tweak for AmdUlpsOffTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let keys = Self::amd_keys();
+        if keys.is_empty() {
+            return TweakStatus::NotApplicable("Nenhuma GPU AMD (VEN_1002) detectada".into());
+        }
+        let ok = keys
+            .iter()
+            .filter(|k| matches!(read_value(RegHive::Hklm, k, "EnableUlps"), Ok(Some(RegValue::DWord(0)))))
+            .count();
+        if ok == keys.len() {
+            TweakStatus::Applied
+        } else if ok == 0 {
+            TweakStatus::NotApplied
+        } else {
+            TweakStatus::Partial(format!("{ok}/{} GPUs AMD", keys.len()))
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let keys = Self::amd_keys();
+        if keys.is_empty() {
+            return Err("Nenhuma GPU AMD (VEN_1002) instalada neste PC.".into());
+        }
+        let mut snap = Vec::new();
+        for k in &keys {
+            let cur = read_value(RegHive::Hklm, k, "EnableUlps")?;
+            snap.push(RegSnapshotEntry {
+                hive: RegHive::Hklm,
+                subkey: k.clone(),
+                name: "EnableUlps".into(),
+                existed: cur.is_some(),
+                value: cur,
+                use_backup_restore: false,
+            });
+        }
+        let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        for (modified, k) in keys.iter().enumerate() {
+            if let Err(e) = write_value(RegHive::Hklm, k, "EnableUlps", &RegValue::DWord(0)) {
+                if created && modified == 0 {
+                    let _ = backups.remove(self.meta.id);
+                }
+                return Err(e);
+            }
+        }
+        Ok(format!(
+            "ULPS desativado (EnableUlps=0) em {} GPU(s) AMD.",
+            keys.len()
+        ))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de EnableUlps encontrado.".into());
+        };
+        let snap: Vec<RegSnapshotEntry> =
+            serde_json::from_value(rec.data).map_err(|e| e.to_string())?;
+        for e in &snap {
+            if e.existed {
+                if let Some(v) = &e.value {
+                    write_value(e.hive, &e.subkey, &e.name, v)?;
+                }
+            } else {
+                delete_value(e.hive, &e.subkey, &e.name)?;
+            }
+        }
+        backups.remove(self.meta.id)?;
+        Ok("EnableUlps restaurado ao padrão.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        for k in Self::amd_keys() {
+            write_value(RegHive::Hklm, &k, "EnableUlps", &RegValue::DWord(1))?;
+        }
+        Ok("EnableUlps definido para padrão (1).".into())
     }
 }
