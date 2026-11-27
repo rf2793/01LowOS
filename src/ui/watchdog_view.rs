@@ -148,6 +148,15 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                         Color32::from_rgb(52, 211, 153),
                         Color32::from_rgb(6, 78, 59),
                     );
+                    ui.label(
+                        RichText::new(format!(
+                            "({})",
+                            crate::watchdog::autostart_exe_path().display()
+                        ))
+                        .small()
+                        .monospace()
+                        .color(Color32::from_rgb(148, 163, 184)),
+                    );
                 }
             });
         });

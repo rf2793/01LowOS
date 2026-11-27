@@ -19,7 +19,7 @@ use crate::sys::backup::{BackupRecord, BackupStore};
 use crate::sys::elevation::{is_elevated, relaunch_elevated};
 use crate::tweaks::catalog::build_catalog;
 use crate::tweaks::{Category, Tweak, TweakStatus};
-use crate::watchdog::{is_autostart_installed, WatchdogEngine};
+use crate::watchdog::{sync_autostart_if_installed, WatchdogEngine};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -433,8 +433,11 @@ impl LowOsApp {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let ok = is_autostart_installed();
+            let (ok, repaired_msg) = sync_autostart_if_installed();
             let _ = tx.send(AppMsg::WatchdogTaskStatus(ok));
+            if let Some(text) = repaired_msg {
+                let _ = tx.send(AppMsg::Banner { ok: true, text });
+            }
             ctx.request_repaint();
         });
     }

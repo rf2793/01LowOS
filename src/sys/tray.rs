@@ -11,11 +11,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, BringWindowToTop, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
     DestroyWindow, DispatchMessageW, EnumWindows, GetCursorPos, GetMessageW, GetWindowLongPtrW,
     GetWindowTextLengthW, GetWindowThreadProcessId, IsWindowVisible, LoadIconW, PostMessageW,
-    PostQuitMessage, RegisterClassW, SetForegroundWindow, SetWindowLongPtrW, ShowWindow,
-    TrackPopupMenu, TranslateMessage, CREATESTRUCTW, GWLP_USERDATA, IDI_APPLICATION, MF_STRING,
-    MSG, SW_HIDE, SW_RESTORE, SW_SHOW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WM_CLOSE,
-    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
-    WM_USER, WNDCLASSW,
+    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
+    SetWindowLongPtrW, ShowWindow, TrackPopupMenu, TranslateMessage, CREATESTRUCTW, GWLP_USERDATA,
+    IDI_APPLICATION, MF_STRING, MSG, SW_HIDE, SW_RESTORE, SW_SHOW, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
+    TPM_RIGHTBUTTON, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP,
+    WM_NULL, WM_RBUTTONUP, WM_USER, WNDCLASSW,
 };
 
 use super::elevation::to_wide_null;
@@ -35,6 +35,7 @@ type TrayCallback = Arc<dyn Fn(TrayAction) + Send + Sync>;
 struct TrayWindowState {
     nid: NOTIFYICONDATAW,
     callback: TrayCallback,
+    taskbar_created_msg: u32,
 }
 
 pub struct TrayIcon {
@@ -146,7 +147,13 @@ impl TrayIcon {
             let copy_len = wide_tip.len().min(max_len);
             nid.szTip[..copy_len].copy_from_slice(&wide_tip[..copy_len]);
 
-            let state = Box::new(TrayWindowState { nid, callback });
+            let taskbar_created_msg =
+                RegisterWindowMessageW(to_wide_null("TaskbarCreated").as_ptr());
+            let state = Box::new(TrayWindowState {
+                nid,
+                callback,
+                taskbar_created_msg,
+            });
             let state_ptr = Box::into_raw(state);
 
             let hwnd = CreateWindowExW(
@@ -171,10 +178,13 @@ impl TrayIcon {
             }
 
             (*state_ptr).nid.hWnd = hwnd;
-            if Shell_NotifyIconW(NIM_ADD, &(*state_ptr).nid) == 0 {
-                DestroyWindow(hwnd);
-                let _ = tx.send(Err("Shell_NotifyIconW(NIM_ADD) falhou.".into()));
-                return;
+            for attempt in 0..20 {
+                if Shell_NotifyIconW(NIM_ADD, &(*state_ptr).nid) != 0 {
+                    break;
+                }
+                if attempt < 19 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
             }
 
             let _ = tx.send(Ok(hwnd as isize));
@@ -217,6 +227,14 @@ unsafe extern "system" fn tray_wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut TrayWindowState;
+    if !ptr.is_null() {
+        let state = &*ptr;
+        if state.taskbar_created_msg != 0 && msg == state.taskbar_created_msg {
+            Shell_NotifyIconW(NIM_ADD, &state.nid);
+            return 0;
+        }
+    }
     match msg {
         WM_CREATE => {
             let cs = &*(lparam as *const CREATESTRUCTW);

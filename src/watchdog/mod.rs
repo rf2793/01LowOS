@@ -871,6 +871,45 @@ fn restore_all_background(saved: &mut HashMap<u32, SavedProcState>, topo: &CpuTo
     restored
 }
 
+pub fn autostart_exe_path() -> PathBuf {
+    let base = std::env::var_os("ProgramData")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+    base.join("01LowOS").join("01LowOS.exe")
+}
+
+fn stage_autostart_binary() -> Result<PathBuf, String> {
+    let current = std::env::current_exe().map_err(|e| e.to_string())?;
+    let target = autostart_exe_path();
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let old = target.with_extension("exe.old");
+    let _ = fs::remove_file(&old);
+
+    if current.to_string_lossy().eq_ignore_ascii_case(&target.to_string_lossy()) {
+        return Ok(target);
+    }
+
+    if let Err(first_err) = fs::copy(&current, &target) {
+        if target.exists() {
+            let _ = fs::rename(&target, &old);
+            fs::copy(&current, &target).map_err(|e| {
+                format!(
+                    "Falha ao copiar executável para {}: {e} (erro inicial: {first_err})",
+                    target.display()
+                )
+            })?;
+        } else {
+            return Err(format!(
+                "Falha ao copiar executável para {}: {first_err}",
+                target.display()
+            ));
+        }
+    }
+    Ok(target)
+}
+
 pub fn is_autostart_installed() -> bool {
     let script = format!(
         "[bool](Get-ScheduledTask -TaskName '{TASK_NAME}' -TaskPath '{TASK_PATH}' -ErrorAction SilentlyContinue)"
@@ -880,21 +919,97 @@ pub fn is_autostart_installed() -> bool {
         .unwrap_or(false)
 }
 
-pub fn install_autostart_task() -> Result<String, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe_esc = exe.to_string_lossy().replace('\'', "''");
+pub fn sync_autostart_if_installed() -> (bool, Option<String>) {
     let script = format!(
         r#"
-$act = New-ScheduledTaskAction -Execute '{exe_esc}' -Argument '--watchdog'
+$t = Get-ScheduledTask -TaskName '{TASK_NAME}' -TaskPath '{TASK_PATH}' -ErrorAction SilentlyContinue
+if (-not $t) {{ Write-Output 'NONE'; exit 0 }}
+$exe = ($t.Actions | Select-Object -First 1).Execute
+$lt = "$($t.Principal.LogonType)"
+Write-Output "$exe|$lt"
+"#
+    );
+    let Ok(out) = run_powershell_checked(&script) else {
+        return (is_autostart_installed(), None);
+    };
+    let s = out.stdout.trim();
+    if s.is_empty() || s.eq_ignore_ascii_case("NONE") {
+        return (false, None);
+    }
+    if !crate::sys::elevation::is_elevated() {
+        return (true, None);
+    }
+
+    let (reg_exe, logon_type) = s.split_once('|').unwrap_or((s, ""));
+    let target = autostart_exe_path();
+    let target_str = target.to_string_lossy();
+    let mut needs_repair = !reg_exe.trim().eq_ignore_ascii_case(&target_str)
+        || !logon_type.trim().eq_ignore_ascii_case("Interactive")
+        || !target.is_file();
+
+    if !needs_repair {
+        if let (Ok(cur), Ok(cur_meta), Ok(dst_meta)) = (
+            std::env::current_exe(),
+            std::env::current_exe().and_then(fs::metadata),
+            fs::metadata(&target),
+        ) {
+            if !cur.to_string_lossy().eq_ignore_ascii_case(&target_str) {
+                let size_diff = cur_meta.len() != dst_meta.len();
+                let newer = match (cur_meta.modified(), dst_meta.modified()) {
+                    (Ok(c), Ok(d)) => c > d,
+                    _ => false,
+                };
+                if size_diff || newer {
+                    needs_repair = true;
+                }
+            }
+        }
+    }
+
+    if needs_repair {
+        match install_autostart_task() {
+            Ok(_) => {
+                return (
+                    true,
+                    Some(format!(
+                        "Tarefa de autostart atualizada para {}.",
+                        target.display()
+                    )),
+                );
+            }
+            Err(e) => {
+                crate::sys::logger::append_log(&format!(
+                    "[Watchdog] Falha ao atualizar tarefa de autostart: {e}"
+                ));
+            }
+        }
+    }
+    (true, None)
+}
+
+pub fn install_autostart_task() -> Result<String, String> {
+    let exe = stage_autostart_binary()?;
+    let exe_esc = exe.to_string_lossy().replace('\'', "''");
+    let dir_esc = exe
+        .parent()
+        .map(|p| p.to_string_lossy().replace('\'', "''"))
+        .unwrap_or_default();
+    let script = format!(
+        r#"
+$act = New-ScheduledTaskAction -Execute '{exe_esc}' -Argument '--watchdog' -WorkingDirectory '{dir_esc}'
 $trg = New-ScheduledTaskTrigger -AtLogOn
-$trg.Delay = 'PT5S'
-$prn = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Highest
-$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Days 0)
+$trg.Delay = 'PT8S'
+$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$prn = New-ScheduledTaskPrincipal -UserId $sid -LogonType Interactive -RunLevel Highest
+$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Days 0)
 Register-ScheduledTask -TaskName '{TASK_NAME}' -TaskPath '{TASK_PATH}' -Action $act -Trigger $trg -Principal $prn -Settings $set -Force | Out-Null
 "#
     );
     run_powershell_checked(&script)?;
-    Ok(format!("Tarefa {TASK_PATH}{TASK_NAME} registrada no logon (5s, Admin sem UAC)."))
+    Ok(format!(
+        "Tarefa {TASK_PATH}{TASK_NAME} registrada em {} no logon (8s, Admin sem UAC).",
+        exe.display()
+    ))
 }
 
 pub fn enable_autostart_with_runtime(engine: &mut WatchdogEngine) -> Result<String, String> {
@@ -974,5 +1089,12 @@ mod tests {
         let loaded = WatchdogConfig::load_from(&tmp);
         assert_eq!(loaded, cfg);
         let _ = fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn autostart_exe_path_uses_local_programdata() {
+        let p = autostart_exe_path();
+        assert!(p.ends_with(std::path::Path::new("01LowOS").join("01LowOS.exe")));
+        assert!(!p.to_string_lossy().trim().is_empty());
     }
 }

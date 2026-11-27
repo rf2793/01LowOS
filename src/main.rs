@@ -112,6 +112,7 @@ fn run_watchdog_headless() -> i32 {
     }
     let mut engine = WatchdogEngine::new();
     engine.start();
+    crate::sys::logger::append_log("[Watchdog] Iniciado em modo bandeja (--watchdog).");
     let alive = Arc::new(AtomicBool::new(true));
     let alive_cb = Arc::clone(&alive);
     let _tray = crate::sys::tray::TrayIcon::new(
@@ -136,6 +137,7 @@ fn run_watchdog_headless() -> i32 {
         std::thread::sleep(Duration::from_millis(400));
     }
     engine.stop();
+    crate::sys::logger::append_log("[Watchdog] Encerrado.");
     0
 }
 
