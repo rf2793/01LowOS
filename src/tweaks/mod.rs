@@ -162,6 +162,7 @@ pub fn run_self_test<F: FnMut(&str)>(
                         | "bloat.system_appx"
                         | "bloat.consumer_appx"
                         | "power.hiberfil_off"
+                        | "sys.reserved_storage_off"
                 ) =>
             {
                 Some("pesado (use --self-test-all)".into())
@@ -186,7 +187,10 @@ pub fn run_self_test<F: FnMut(&str)>(
         let apply_ok_status = matches!(after_apply, TweakStatus::Applied)
             || (matches!(
                 m.id,
-                "tasks.windows_bloat" | "net.wol_eee_off" | "net.qos_nic_flow_off"
+                "tasks.windows_bloat"
+                    | "net.wol_eee_off"
+                    | "net.qos_nic_flow_off"
+                    | "net.nic_lso_uso_off"
             )
                 && matches!(after_apply, TweakStatus::Partial(_))
                 && after_apply != before);

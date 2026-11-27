@@ -8,12 +8,14 @@ use crate::tweaks::advanced::{
     GpuNicMsiModeTweak, HdAudioIdleOffTweak, LegacyHardwareIrqTweak, MemoryCompressionTweak,
     MmAgentPrelaunchTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak, NvidiaHdcpOffTweak,
     NvidiaTelemetryTweak, NvmeStorageMsiTweak, OptionalFeaturesTweak, PnpUnusedDevicesTweak,
-    PresentMonFpsTweak, SmartScreenAclTweak, SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak,
-    UsbAudioMsiModeTweak, UsbD3SuspendTweak, UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
+    PresentMonFpsTweak, ReservedStorageOffTweak, SmartScreenAclTweak, SystemAppxTweak,
+    TcpNagleTweak, ThirdPartyBloatTweak, UsbAudioMsiModeTweak, UsbD3SuspendTweak,
+    UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
 };
 use crate::tweaks::network::{
     NetBiosOffTweak, NetQosNicFlowTweak, NetRscUdpLatencyTweak, NetTcpBbr2Tweak, NicBindingsTweak,
-    NicInterruptModerationOffTweak, NicRssTweak, NicWolEeeTweak, WinInetWpadTweak,
+    NicInterruptModerationOffTweak, NicLsoUsoOffTweak, NicRssTweak, NicWolEeeTweak,
+    WinInetWpadTweak,
 };
 use crate::tweaks::power::{
     DeviceWakeTweak, HiberfilOffTweak, HybridCpuPcoreTweak, PowerPlanTweak,
@@ -31,7 +33,7 @@ fn sz(v: &str) -> RegValue {
 }
 
 pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
-    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(108);
+    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(110);
 
     // 1. GPU & LATÊNCIA
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -484,6 +486,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(SmartScreenAclTweak::new()));
     list.push(Box::new(DefenderGameExclusionsTweak::new()));
     list.push(Box::new(DefenderScanThrottleTweak::new()));
+    list.push(Box::new(ReservedStorageOffTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
@@ -563,6 +566,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(NetRscUdpLatencyTweak::new()));
     list.push(Box::new(NetQosNicFlowTweak::new()));
     list.push(Box::new(NicInterruptModerationOffTweak::new()));
+    list.push(Box::new(NicLsoUsoOffTweak::new()));
     list.push(Box::new(NetTcpBbr2Tweak::new()));
     list.push(Box::new(NetBiosOffTweak::new()));
     list.push(Box::new(CloudflareDnsTweak::new()));
@@ -1029,12 +1033,12 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "bloat.browsers_bg_telemetry_off",
-            name: "Navegadores (Chrome, Brave, Edge): Desativar fundo após fechar e telemetria",
+            name: "Navegadores (Chrome, Brave, Edge, Firefox): Desativar fundo após fechar e telemetria",
             category: Category::PrivacyBloat,
             risk: RiskLevel::Low,
             requires_reboot: false,
             requires_admin: true,
-            description: "Impede Chrome e Brave de continuarem rodando na bandeja após fechar (BackgroundModeEnabled=0) e desativa telemetria/promoções/coleções de Chrome, Brave e Edge por política oficial.",
+            description: "Impede Chrome e Brave de continuarem rodando na bandeja após fechar (BackgroundModeEnabled=0) e desativa telemetria/estudos/promoções/coleções de Chrome, Brave, Edge e Firefox (DisableTelemetry, DisableFirefoxStudies, DisablePocket) por política oficial.",
             details: vec![],
         },
         vec![
@@ -1048,6 +1052,9 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "EdgeCollectionsEnabled", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "ShowRecommendationsEnabled", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "PersonalizationReportingEnabled", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisableTelemetry", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisableFirefoxStudies", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisablePocket", dw(1)),
         ],
         vec![
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Google\Chrome", "BackgroundModeEnabled"),
@@ -1060,6 +1067,9 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "EdgeCollectionsEnabled"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "ShowRecommendationsEnabled"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "PersonalizationReportingEnabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisableTelemetry"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisableFirefoxStudies"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Mozilla\Firefox", "DisablePocket"),
         ],
     )));
 
@@ -1110,6 +1120,31 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\FindMyDevice", "AllowFindMyDevice"),
             RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", "DOTNET_CLI_TELEMETRY_OPTOUT"),
             RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", "POWERSHELL_TELEMETRY_OPTOUT"),
+        ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "bloat.office_telemetry_off",
+            name: "Políticas Office/Microsoft 365: Desativar telemetria, feedback e análise de conteúdo",
+            category: Category::PrivacyBloat,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: false,
+            description: "Aplica políticas oficiais GPO do Microsoft Office 16.0 / Microsoft 365 em HKCU para desativar telemetria de cliente, prompts de feedback e experiências conectadas opcionais/análise de conteúdo, preservando login da Conta Microsoft e salvamento no OneDrive.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\clienttelemetry", "DisableTelemetry", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\privacy", "controllerconnectedservicesenabled", dw(2)),
+            RegOp::set(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\privacy", "usercontentdisabled", dw(2)),
+            RegOp::set(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\feedback", "enabled", dw(0)),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\clienttelemetry", "DisableTelemetry"),
+            RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\privacy", "controllerconnectedservicesenabled"),
+            RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\privacy", "usercontentdisabled"),
+            RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\office\16.0\common\feedback", "enabled"),
         ],
     )));
 
@@ -1699,6 +1734,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "bloat.browsers_bg_telemetry_off",
     "bloat.autorun_off",
     "bloat.cli_notepad_ai_telemetry_off",
+    "bloat.office_telemetry_off",
     "bloat.maintenance_background_off",
     "bloat.actioncenter_sso",
     "tasks.windows_bloat",
@@ -1723,7 +1759,7 @@ mod tests {
     #[test]
     fn catalog_ids_are_unique_and_non_empty() {
         let cat = build_catalog();
-        assert!(cat.len() >= 102);
+        assert!(cat.len() >= 105);
         validate_catalog(&cat).unwrap();
     }
 
@@ -1784,6 +1820,11 @@ mod tests {
                 assert!(!low.contains("powermizerlevel"), "Placebo proibido em {}", meta.id);
                 assert!(!low.contains("minimumstackcommitinbytes"), "Tweak perigoso proibido em {}", meta.id);
                 assert!(!low.contains("splitlargecaches"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("latencyhintperf"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("latencyhintunpark"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("intsteermode"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("scanwhenassociated"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("checksumoffload"), "Tweak toxico proibido em {}", meta.id);
                 if !low.starts_with("remover ") {
                     assert!(!low.contains("iopagelocklimit"), "Placebo proibido em {}", meta.id);
                     assert!(!low.contains("globaltimerresolutionrequests"), "Timer global proibido em {}", meta.id);

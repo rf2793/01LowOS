@@ -4715,3 +4715,113 @@ $p = Get-MpPreference -ErrorAction Stop
         Ok("Preferências do Defender restauradas ao padrão Microsoft.".into())
     }
 }
+
+pub struct ReservedStorageOffTweak {
+    meta: TweakMeta,
+}
+
+impl ReservedStorageOffTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "sys.reserved_storage_off",
+                name: "Armazenamento Reservado do Windows: Desativar (libera ~7–12 GB no SSD)",
+                category: Category::SystemKernel,
+                risk: RiskLevel::Low,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Desativa o Armazenamento Reservado do Windows Update via Set-WindowsReservedStorageState -State Disabled, liberando ~7–12 GB no SSD/NVMe (100% reversível com -State Enabled). Opcional: mantenha pelo menos 15 GB livres na unidade C: para futuras atualizações.",
+                details: vec![
+                    "Set-WindowsReservedStorageState -State Disabled (libera ~7-12 GB; reversível via -State Enabled)".into(),
+                ],
+            },
+        }
+    }
+}
+
+impl Tweak for ReservedStorageOffTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        if !crate::sys::elevation::is_elevated() {
+            return TweakStatus::NotApplicable("Requer Admin para verificar".into());
+        }
+        let script = r#"
+if (-not (Get-Command Get-WindowsReservedStorageState -ErrorAction SilentlyContinue)) {
+    Write-Output 'UNSUPPORTED'
+    exit 0
+}
+$st = Get-WindowsReservedStorageState -ErrorAction Stop
+Write-Output "$($st.State)"
+"#;
+        match run_powershell_checked(script) {
+            Ok(out) => {
+                let s = out.stdout.trim();
+                if s.eq_ignore_ascii_case("UNSUPPORTED") {
+                    TweakStatus::NotApplicable("Cmdlet Reserved Storage indisponível".into())
+                } else if s.eq_ignore_ascii_case("Disabled") {
+                    TweakStatus::Applied
+                } else if s.eq_ignore_ascii_case("Enabled") {
+                    TweakStatus::NotApplied
+                } else {
+                    TweakStatus::Error(s.to_string())
+                }
+            }
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let query = r#"
+if (-not (Get-Command Get-WindowsReservedStorageState -ErrorAction SilentlyContinue)) {
+    throw 'Cmdlet Get-WindowsReservedStorageState indisponível nesta edição do Windows.'
+}
+$st = Get-WindowsReservedStorageState -ErrorAction Stop
+Write-Output "$($st.State)"
+"#;
+        let out = run_powershell_checked(query)?;
+        let state = out.stdout.trim();
+        if state.eq_ignore_ascii_case("Disabled") {
+            return Ok("Armazenamento Reservado do Windows já está desativado.".into());
+        }
+        let created = backups.save_if_absent(
+            self.meta.id,
+            serde_json::json!({ "was_enabled": true }),
+        )?;
+        if let Err(e) =
+            run_powershell_checked("Set-WindowsReservedStorageState -State Disabled -ErrorAction Stop | Out-Null")
+        {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
+        Ok("Armazenamento Reservado do Windows desativado (~7–12 GB liberados).".into())
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de Armazenamento Reservado encontrado.".into());
+        };
+        if rec.data["was_enabled"].as_bool().unwrap_or(true) {
+            run_powershell_checked(
+                "Set-WindowsReservedStorageState -State Enabled -ErrorAction Stop | Out-Null",
+            )?;
+        }
+        backups.remove(self.meta.id)?;
+        Ok("Armazenamento Reservado do Windows restaurado.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        run_powershell_checked(
+            "Set-WindowsReservedStorageState -State Enabled -ErrorAction Stop | Out-Null",
+        )?;
+        Ok("Armazenamento Reservado do Windows restaurado ao padrão (Enabled).".into())
+    }
+}

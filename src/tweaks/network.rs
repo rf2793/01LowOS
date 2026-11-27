@@ -182,12 +182,15 @@ struct WolEntry {
 const WOL_PROPS: &[&str] = &[
     "*WakeOnMagicPacket",
     "*WakeOnPattern",
+    "WakeOnPattern",
     "S5WakeOnLan",
     "WakeOnMagicPacketFromS5",
     "*EEE",
     "AdvancedEEE",
     "EnableGreenEthernet",
     "PowerSavingMode",
+    "LowPowerEnable",
+    "UAPSDSupport",
     "GigaLite",
     "GigabitLite",
     "*IdleRestriction",
@@ -324,7 +327,9 @@ Write-Output $cnt
         match run_powershell_checked(&apply) {
             Ok(r) => Ok(format!("WOL/EEE desativado em {} propriedade(s).", r.stdout.trim())),
             Err(e) => {
-                let _ = created;
+                if created {
+                    let _ = backups.remove(self.meta.id);
+                }
                 Err(e)
             }
         }
@@ -820,7 +825,14 @@ Get-NetAdapter -Physical -ErrorAction SilentlyContinue | ForEach-Object {
 }
 
 const PSCHED_KEY: &str = r"SOFTWARE\Policies\Microsoft\Windows\Psched";
-const QOS_NIC_PROPS: &[&str] = &["*FlowControl", "*PMARPOffload", "*PMNSOffload"];
+const QOS_NIC_PROPS: &[&str] = &[
+    "*FlowControl",
+    "*PMARPOffload",
+    "*PMNSOffload",
+    "PMARPOffload",
+    "PMNSOffload",
+    "PMWiFiRekeyOffload",
+];
 
 #[derive(Debug, Serialize, Deserialize)]
 struct QosNicFlowBackup {
@@ -843,10 +855,10 @@ impl NetQosNicFlowTweak {
                 risk: RiskLevel::Low,
                 requires_reboot: true,
                 requires_admin: true,
-                description: "Define Psched\\NonBestEffortLimit=0 (remove a reserva padrão de 20% de banda do Packet Scheduler) e desativa *FlowControl, *PMARPOffload e *PMNSOffload nos adaptadores físicos para evitar quadros PAUSE e offloads de suspensão.",
+                description: "Define Psched\\NonBestEffortLimit=0 (remove a reserva padrão de 20% de banda do Packet Scheduler) e desativa *FlowControl, *PMARPOffload/PMARPOffload, *PMNSOffload/PMNSOffload e PMWiFiRekeyOffload nos adaptadores físicos para evitar quadros PAUSE e offloads de suspensão.",
                 details: vec![
                     format!(r"HKLM\{PSCHED_KEY}\NonBestEffortLimit = 0"),
-                    "Adaptadores físicos: *FlowControl = 0, *PMARPOffload = 0, *PMNSOffload = 0".into(),
+                    "Adaptadores físicos: *FlowControl, *PMARPOffload/PMARPOffload, *PMNSOffload/PMNSOffload, PMWiFiRekeyOffload = 0".into(),
                 ],
             },
         }
@@ -971,7 +983,22 @@ foreach ($r in $rows) {{
 Write-Output $ok
 "#
             );
-            let res = run_powershell_checked(&apply_script)?;
+            let res = match run_powershell_checked(&apply_script) {
+                Ok(r) => r,
+                Err(e) => {
+                    if snap.qos_existed {
+                        if let Some(ref v) = snap.qos_val {
+                            let _ = write_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit", v);
+                        }
+                    } else {
+                        let _ = delete_value(RegHive::Hklm, PSCHED_KEY, "NonBestEffortLimit");
+                    }
+                    if created {
+                        let _ = backups.remove(self.meta.id);
+                    }
+                    return Err(e);
+                }
+            };
             ok_count = res.stdout.trim().parse().unwrap_or(0);
         }
         Ok(format!(
@@ -1500,5 +1527,197 @@ impl Tweak for NetBiosOffTweak {
             "NetbiosOptions restaurado para padrão DHCP (0) em {} interface(s).",
             keys.len()
         ))
+    }
+}
+
+const LSO_USO_PROPS: &[&str] = &["*LsoV2IPv4", "*LsoV2IPv6", "*USOIPv4", "*USOIPv6"];
+
+pub struct NicLsoUsoOffTweak {
+    meta: TweakMeta,
+}
+
+impl NicLsoUsoOffTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "net.nic_lso_uso_off",
+                name: "Rede: Desativar LSO v2 e USO na placa de rede (troubleshooting jitter/I225-I226)",
+                category: Category::Network,
+                risk: RiskLevel::Medium,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Desativa Large Send Offload v2 (*LsoV2IPv4/6) e UDP Segmentation Offload (*USOIPv4/6) nos adaptadores físicos ativos. Opcional (troubleshooting): útil se houver jitter, bufferbloat ou quedas (Event 6062) em NICs Intel I225/I226 ou Realtek; preserva Checksum Offloads ativados.",
+                details: LSO_USO_PROPS
+                    .iter()
+                    .map(|p| format!("Adaptadores físicos ativos: {p} = 0"))
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl Tweak for NicLsoUsoOffTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let keywords = LSO_USO_PROPS
+            .iter()
+            .map(|k| format!("'{k}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let script = format!(
+            r#"
+$keys = @({keywords})
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object {{ $_.Status -ne 'Not Present' }})
+$total = 0; $zero = 0
+foreach ($n in $nics) {{
+    $props = @(Get-NetAdapterAdvancedProperty -Name $n.Name -ErrorAction SilentlyContinue | Where-Object {{ $keys -contains $_.RegistryKeyword }})
+    foreach ($p in $props) {{
+        if (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0') {{
+            $total++
+            if ([string]@($p.RegistryValue)[0] -eq '0') {{ $zero++ }}
+        }}
+    }}
+}}
+Write-Output "$zero/$total"
+"#
+        );
+        match run_powershell_checked(&script) {
+            Ok(out) => {
+                if let Some((a, b)) = out.stdout.trim().split_once('/') {
+                    let ok: usize = a.parse().unwrap_or(0);
+                    let total: usize = b.parse().unwrap_or(0);
+                    if total == 0 {
+                        TweakStatus::NotApplicable("Nenhum adaptador expõe LSO v2 / USO".into())
+                    } else if ok == total {
+                        TweakStatus::Applied
+                    } else if ok == 0 {
+                        TweakStatus::NotApplied
+                    } else {
+                        TweakStatus::Partial(format!("{ok}/{total} propriedades"))
+                    }
+                } else {
+                    TweakStatus::Error(out.stdout)
+                }
+            }
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let keywords = LSO_USO_PROPS
+            .iter()
+            .map(|k| format!("'{k}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let query = format!(
+            r#"
+$keys = @({keywords})
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object {{ $_.Status -ne 'Not Present' }})
+$rows = foreach ($n in $nics) {{
+    $props = @(Get-NetAdapterAdvancedProperty -Name $n.Name -ErrorAction SilentlyContinue | Where-Object {{ $keys -contains $_.RegistryKeyword }})
+    foreach ($p in $props) {{
+        if (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0') {{
+            [pscustomobject]@{{ nic = $n.Name; key = $p.RegistryKeyword; val = [string]@($p.RegistryValue)[0] }}
+        }}
+    }}
+}}
+if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
+"#
+        );
+        let out = run_powershell_checked(&query)?;
+        let rows: Vec<WolEntry> =
+            serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
+        if rows.is_empty() {
+            return Ok("Nenhuma propriedade LSO v2 / USO encontrada para ajustar.".into());
+        }
+        let json = serde_json::to_value(&rows).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        let escaped = serde_json::to_string(&rows)
+            .map_err(|e| e.to_string())?
+            .replace('\'', "''");
+        let apply = format!(
+            r#"
+$rows = @((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }})
+$ok = 0
+foreach ($r in $rows) {{
+    try {{
+        Set-NetAdapterAdvancedProperty -Name $r.nic -RegistryKeyword $r.key -RegistryValue 0 -NoRestart -ErrorAction Stop
+        $ok++
+    }} catch {{}}
+}}
+Write-Output $ok
+"#
+        );
+        match run_powershell_checked(&apply) {
+            Ok(r) => Ok(format!(
+                "LSO v2 / USO desativado em {} propriedade(s).",
+                r.stdout.trim()
+            )),
+            Err(e) => {
+                if created {
+                    let _ = backups.remove(self.meta.id);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de LSO v2 / USO encontrado.".into());
+        };
+        let rows: Vec<WolEntry> =
+            serde_json::from_value(rec.data).map_err(|e| format!("Backup inválido: {e}"))?;
+        let escaped = serde_json::to_string(&rows)
+            .map_err(|e| e.to_string())?
+            .replace('\'', "''");
+        let script = format!(
+            r#"
+$rows = @((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }})
+foreach ($r in $rows) {{
+    if (-not $r.key) {{ continue }}
+    try {{
+        Set-NetAdapterAdvancedProperty -Name $r.nic -RegistryKeyword $r.key -RegistryValue $r.val -NoRestart -ErrorAction Stop
+    }} catch {{}}
+}}
+"#
+        );
+        run_powershell_checked(&script)?;
+        backups.remove(self.meta.id)?;
+        Ok(format!("LSO v2 / USO restaurado ({} itens).", rows.len()))
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        let keywords = LSO_USO_PROPS
+            .iter()
+            .map(|k| format!("'{k}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let script = format!(
+            r#"
+$keys = @({keywords})
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object {{ $_.Status -ne 'Not Present' }})
+foreach ($n in $nics) {{
+    $props = @(Get-NetAdapterAdvancedProperty -Name $n.Name -ErrorAction SilentlyContinue | Where-Object {{ $keys -contains $_.RegistryKeyword }})
+    foreach ($p in $props) {{
+        if (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '1') {{
+            try {{
+                Set-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword $p.RegistryKeyword -RegistryValue 1 -NoRestart -ErrorAction Stop
+            }} catch {{}}
+        }}
+    }}
+}}
+"#
+        );
+        run_powershell_checked(&script)?;
+        Ok("LSO v2 / USO restaurado para o padrão (1).".into())
     }
 }
