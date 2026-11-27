@@ -226,6 +226,16 @@ pub fn list_subkeys(hive: RegHive, subkey: &str) -> Vec<String> {
     key.enum_keys().filter_map(|r| r.ok()).collect()
 }
 
+pub fn list_value_names(hive: RegHive, subkey: &str) -> Vec<String> {
+    let root = RegKey::predef(hive.as_winreg_hkey());
+    let Ok(key) = root.open_subkey_with_flags(subkey, KEY_READ) else {
+        return Vec::new();
+    };
+    key.enum_values()
+        .filter_map(|r| r.ok().map(|(name, _)| name))
+        .collect()
+}
+
 pub fn read_value(hive: RegHive, subkey: &str, name: &str) -> Result<Option<RegValue>, String> {
     let root = RegKey::predef(hive.as_winreg_hkey());
     let key = match root.open_subkey_with_flags(subkey, KEY_READ) {

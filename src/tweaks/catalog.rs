@@ -3,14 +3,15 @@ use std::collections::HashSet;
 use crate::sys::registry::{RegHive, RegValue};
 use crate::tweaks::advanced::{
     ActionCenterSsoTweak, AmdShaderCacheTweak, AudioEnhancementsTweak, CloudflareDnsTweak,
-    ConsumerAppxTweak, EtwAutologgerTweak, FirewallOrphansTweak, GpuNicMsiModeTweak,
-    LegacyHardwareIrqTweak, MemoryCompressionTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak,
-    NvidiaTelemetryTweak, OptionalFeaturesTweak, PnpUnusedDevicesTweak, PresentMonFpsTweak,
-    SmartScreenAclTweak, SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak,
-    UsbAudioMsiModeTweak, UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
+    ConsumerAppxTweak, DefenderGameExclusionsTweak, EdgeBackgroundTweak, EtwAutologgerTweak,
+    FirewallOrphansTweak, GpuNicMsiModeTweak, LegacyHardwareIrqTweak, MemoryCompressionTweak,
+    NicPowerMgmtTweak, NvidiaDynamicPstateTweak, NvidiaHdcpOffTweak, NvidiaTelemetryTweak,
+    OptionalFeaturesTweak, PnpUnusedDevicesTweak, PresentMonFpsTweak, SmartScreenAclTweak,
+    SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak, UsbAudioMsiModeTweak,
+    UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
 };
 use crate::tweaks::network::{
-    NicBindingsTweak, NicRssTweak, NicWolEeeTweak, WinInetWpadTweak,
+    NetRscUdpLatencyTweak, NicBindingsTweak, NicRssTweak, NicWolEeeTweak, WinInetWpadTweak,
 };
 use crate::tweaks::power::{DeviceWakeTweak, PowerPlanTweak};
 use crate::tweaks::registry_tweak::{RegOp, RegistryTweak};
@@ -26,7 +27,7 @@ fn sz(v: &str) -> RegValue {
 }
 
 pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
-    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(72);
+    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(80);
 
     // 1. GPU & LATÊNCIA
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -113,6 +114,27 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         ],
     )));
 
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "gpu.gamebar_presence_off",
+            name: "Bloquear GameBarPresenceWriter e GameBar em 2º plano (IFEO)",
+            category: Category::GpuLatency,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Redireciona GameBarPresenceWriter.exe e GameBar.exe para systray.exe, evitando o processo residual da Game Bar (~145 MB RAM) sem afetar Xbox App, Game Pass ou Modo de Jogo. Atenção: o atalho Win+G não abrirá a Game Bar até reverter.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\GameBarPresenceWriter.exe", "Debugger", sz(r"C:\Windows\System32\systray.exe")),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\GameBar.exe", "Debugger", sz(r"C:\Windows\System32\systray.exe")),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\GameBarPresenceWriter.exe", "Debugger"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\GameBar.exe", "Debugger"),
+        ],
+    )));
+
     list.push(Box::new(RegistryTweak::new(
         TweakMeta {
             id: "gpu.mmcss_games",
@@ -137,6 +159,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(GpuNicMsiModeTweak::new()));
     list.push(Box::new(NvidiaTelemetryTweak::new()));
     list.push(Box::new(NvidiaDynamicPstateTweak::new()));
+    list.push(Box::new(NvidiaHdcpOffTweak::new()));
     list.push(Box::new(AudioEnhancementsTweak::new()));
 
     // 2. SISTEMA & KERNEL
@@ -232,6 +255,27 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
+            id: "sys.cpu_mitigations_off",
+            name: "CPU: Desativar mitigações Spectre/Meltdown (FeatureSettingsOverride=3)",
+            category: Category::SystemKernel,
+            risk: RiskLevel::High,
+            requires_reboot: true,
+            requires_admin: true,
+            description: "Define FeatureSettingsOverride=3 e FeatureSettingsOverrideMask=3 em Memory Management, reduzindo overhead de syscalls em jogos CPU-bound. Atenção: desativa proteções contra vulnerabilidades de hardware Spectre/Meltdown — use apenas em PC dedicado a jogos.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "FeatureSettingsOverride", dw(3)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "FeatureSettingsOverrideMask", dw(3)),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "FeatureSettingsOverride"),
+            RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "FeatureSettingsOverrideMask"),
+        ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
             id: "sys.fth_off",
             name: "Desativar Fault Tolerant Heap (FTH)",
             category: Category::SystemKernel,
@@ -262,17 +306,32 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
+            id: "sys.win32_priority_separation",
+            name: "Agendador CPU: Win32PrioritySeparation=0x26 (Short, Fixed, High Foreground)",
+            category: Category::SystemKernel,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Ajusta o quantum do agendador de threads do Windows para fatias curtas e fixas com prioridade máxima para a janela em primeiro plano (0x26 / 38 decimal), melhorando consistência de frametime e 1% low.",
+            details: vec![],
+        },
+        vec![RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\PriorityControl", "Win32PrioritySeparation", dw(0x26))],
+        vec![RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\PriorityControl", "Win32PrioritySeparation", dw(2))],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
             id: "sys.ntfs_low_overhead",
             name: "NTFS: Desativar LastAccessUpdate e nomes curtos 8.3 (mantém TRIM)",
             category: Category::SystemKernel,
             risk: RiskLevel::Low,
             requires_reboot: true,
             requires_admin: true,
-            description: "Evita gravações de metadata a cada leitura de arquivos/texturas nos jogos (equivalente a fsutil disablelastaccess 1 e disable8dot3 1) sem desativar TRIM.",
+            description: "Evita gravações de metadata a cada leitura de arquivos/texturas nos jogos (equivalente a fsutil disablelastaccess 1 / 0x80000001 e disable8dot3 1) sem desativar TRIM.",
             details: vec![],
         },
         vec![
-            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsDisableLastAccessUpdate", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsDisableLastAccessUpdate", dw(0x8000_0001)),
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsDisable8dot3NameCreation", dw(1)),
         ],
         vec![
@@ -294,6 +353,27 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         },
         vec![RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsMemoryUsage", dw(2))],
         vec![RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "NtfsMemoryUsage", dw(0))],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "sys.prefetcher_off",
+            name: "NVMe/SSD: Desativar Prefetcher e Superfetch (EnablePrefetcher=0)",
+            category: Category::SystemKernel,
+            risk: RiskLevel::Low,
+            requires_reboot: true,
+            requires_admin: true,
+            description: "Define EnablePrefetcher=0 e EnableSuperfetch=0 em PrefetchParameters, evitando gravações de arquivos .pf no NVMe/SSD sem benefício em armazenamento flash.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters", "EnablePrefetcher", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters", "EnableSuperfetch", dw(0)),
+        ],
+        vec![
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters", "EnablePrefetcher", dw(3)),
+            RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters", "EnableSuperfetch"),
+        ],
     )));
 
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -333,6 +413,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     )));
 
     list.push(Box::new(SmartScreenAclTweak::new()));
+    list.push(Box::new(DefenderGameExclusionsTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
@@ -381,6 +462,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(NicPowerMgmtTweak::new()));
     list.push(Box::new(NicBindingsTweak::new()));
     list.push(Box::new(TcpNagleTweak::new()));
+    list.push(Box::new(NetRscUdpLatencyTweak::new()));
     list.push(Box::new(CloudflareDnsTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -721,30 +803,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         ],
     )));
 
-    list.push(Box::new(RegistryTweak::with_defaults(
-        TweakMeta {
-            id: "bloat.edge_background_off",
-            name: "Microsoft Edge: Desativar Startup Boost, modo em 2º plano e barra lateral",
-            category: Category::PrivacyBloat,
-            risk: RiskLevel::Low,
-            requires_reboot: false,
-            requires_admin: true,
-            description: "Impede que o Microsoft Edge pré-carregue no boot (Startup Boost) e continue em RAM após ser fechado, economizando ~150–250 MB de RAM e processos WebView em Windows 11 Home/Pro 24H2/25H2/26H1. O navegador continua funcionando normalmente ao abrir.",
-            details: vec![],
-        },
-        vec![
-            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "StartupBoostEnabled", dw(0)),
-            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "BackgroundModeEnabled", dw(0)),
-            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "HubsSidebarEnabled", dw(0)),
-            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "EdgeShoppingAssistantEnabled", dw(0)),
-        ],
-        vec![
-            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "StartupBoostEnabled"),
-            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "BackgroundModeEnabled"),
-            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "HubsSidebarEnabled"),
-            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "EdgeShoppingAssistantEnabled"),
-        ],
-    )));
+    list.push(Box::new(EdgeBackgroundTweak::new()));
 
     list.push(Box::new(RegistryTweak::new(
         TweakMeta {
@@ -777,6 +836,10 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\SettingSync", "DisableSettingSyncUserOverride", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\WindowsInkWorkspace", "AllowWindowsInkWorkspace", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\InputPersonalization", "AllowInputPersonalization", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "EnableCdp", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "EnableFontProviders", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "DoNotShowFeedbackNotifications", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection", "MaxTelemetryAllowed", dw(0)),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{596AB062-B4D2-4215-9F74-E9109B0A8153}", sz("")),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{7AD84985-87B4-4a16-BE58-8B72A5B390F7}", sz("")),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{f81e9010-6ea4-11ce-a7ff-00aa003ca9f6}", sz("")),
@@ -1027,7 +1090,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         "McmSvc", "WwanSvc", "MessagingService", "hpatchmon", "refsdedupsvc", "ZTHELPER", "P9RdrService",
         "PenService", "IsolationSession", "IsoSessionCore", "ApxSvc", "midisrv",
         "WPDBusEnum", "NcbService", "WManSvc",
-        "IKEEXT", "MSDTC", "wbengine", "PerfHost", "VSS", "swprv", "XboxGipSvc", "RasMan",
+        "IKEEXT", "MSDTC", "wbengine", "PerfHost", "VSS", "swprv", "XboxGipSvc", "RasMan", "SSDPSRV",
     ];
     let mut misc_targets: Vec<ServiceTarget> = misc_disable
         .iter()
@@ -1164,6 +1227,11 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         r"\Microsoft\Windows\WOF\WIM-Hash-*",
         r"\Microsoft\Windows\AppxDeploymentClient\UCPD velocity",
         r"\Microsoft\XblGameSave\XblGameSaveTask",
+        r"\SoftLanding\*",
+        r"\Microsoft\Windows\Windows Media Sharing\*",
+        r"\Microsoft\Windows\Application Experience\PcaPatchDbTask",
+        r"\Microsoft\Windows\Application Experience\SdbinstMergeDbTask",
+        r"\Microsoft\Windows\USB\Usb-Notifications",
     ];
     list.push(Box::new(ScheduledTaskGroupTweak::new(
         TweakMeta {
@@ -1223,6 +1291,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "gpu.mpo_off",
     "gpu.windowed_optimizations",
     "gpu.game_mode",
+    "gpu.gamebar_presence_off",
     "gpu.mmcss_games",
     "gpu.presentmon_fps",
     "gpu.msi_mode",
@@ -1236,8 +1305,11 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "sys.vbs_hvci_off",
     "sys.fth_off",
     "sys.power_throttling_off",
+    "sys.win32_priority_separation",
     "sys.ntfs_low_overhead",
     "sys.ntfs_memory_usage",
+    "sys.prefetcher_off",
+    "sys.defender_game_exclusions",
     "sys.ifeo_touch_voice_off",
     "power.plan_01lowos",
     "power.device_wake_off",
@@ -1247,6 +1319,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "net.nic_power_mgmt_off",
     "net.llmnr_mdns_wpad_off",
     "net.wininet_wpad_off",
+    "net.rsc_udp_latency",
     "user.mouse_raw",
     "user.keyboard_accessibility",
     "user.visual_perf",

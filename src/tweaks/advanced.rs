@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::sys::backup::BackupStore;
 use crate::sys::cmd::{run_hidden, run_powershell_checked};
 use crate::sys::registry::{
-    delete_value, delete_value_backup_restore, key_exists, list_subkeys, read_value, write_value,
-    write_value_backup_restore, RegHive, RegValue,
+    delete_value, delete_value_backup_restore, key_exists, list_subkeys, list_value_names,
+    read_value, write_value, write_value_backup_restore, RegHive, RegValue,
 };
 use crate::tweaks::registry_tweak::RegSnapshotEntry;
 use crate::tweaks::{Category, RiskLevel, Tweak, TweakMeta, TweakStatus};
@@ -1283,11 +1283,11 @@ impl ThirdPartyBloatTweak {
                 risk: RiskLevel::Low,
                 requires_reboot: false,
                 requires_admin: true,
-                description: "Desativa itens de atualização/telemetria de terceiros (Crash Defender, Razer Game Manager/Update, MSI Center, amd3dvcacheSvc, AsusUpdateCheck, GoogleUpdater, StartCN/StartDVR, StartupApproved Razer/AMDNoiseSuppression). Mantém Synapse/External Events utilizáveis manualmente.",
+                description: "Desativa itens de atualização/telemetria de terceiros (Crash Defender, Razer Game Manager/Update, MSI Center, amd3dvcacheSvc, AsusUpdateCheck, GoogleUpdater, NvDriverUpdateCheckDaily, NVIDIA App SelfUpdate, PlatformExperiencesHelper, StartCN/StartDVR, StartupApproved Razer/AMDNoiseSuppression/GoogleUpdater). Mantém Synapse/External Events utilizáveis manualmente.",
                 details: vec![
                     "Serviços: AMD Crash Defender, Razer Game Manager 3/Update, MSI_Case/Center, amd3dvcacheSvc, AsusUpdateCheck, GoogleUpdater*".into(),
-                    "Tarefas: AMDRyzenMasterSDKTask, AMD Check For Updates, StartDVR, StartCN, GoogleUpdaterTaskSystem*".into(),
-                    "Drivers Ryzen Master V29/V32 Start=4, AMD DisableAutoUpdates=1, StartupApproved RazerAppEngine/AMDNoiseSuppression".into(),
+                    "Tarefas: AMDRyzenMasterSDKTask, AMD Check For Updates, AMDInstallLauncher, StartDVR, StartCN, NvDriverUpdateCheckDaily*, NVIDIA App SelfUpdate*, PlatformExperiencesHelper_*, GoogleUpdaterTaskSystem/User*".into(),
+                    "Drivers Ryzen Master V29/V32 Start=4, AMD DisableAutoUpdates=1, StartupApproved RazerAppEngine/AMDNoiseSuppression/GoogleUpdaterTaskUser*".into(),
                 ],
             },
         }
@@ -1304,7 +1304,14 @@ impl Tweak for ThirdPartyBloatTweak {
 $names = @('AMD Crash Defender Service','Razer Game Manager Service 3','Razer Update Service','MSI_Case_Service','MSI_Center_Service','amd3dvcacheSvc','AsusUpdateCheck')
 $svcAll = @(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | Where-Object { $names -contains $_.Name -or $_.Name -like 'GoogleUpdaterService*' -or $_.Name -like 'GoogleUpdaterInternalService*' })
 $svcPending = @($svcAll | Where-Object { $_.StartMode -ne 'Disabled' }).Count
-$tasksAll = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -in @('AMDRyzenMasterSDKTask','AMD Install Manager - Check For Updates','StartDVR','StartCN') -or $_.TaskName -like 'GoogleUpdaterTaskSystem*' })
+$tasksAll = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
+    $_.TaskName -in @('AMDRyzenMasterSDKTask','AMD Install Manager - Check For Updates','AMDInstallLauncher','StartDVR','StartCN') -or
+    $_.TaskName -like 'GoogleUpdaterTaskSystem*' -or
+    $_.TaskName -like 'GoogleUpdaterTaskUser*' -or
+    $_.TaskName -like 'NvDriverUpdateCheckDaily*' -or
+    $_.TaskName -like 'NVIDIA App SelfUpdate*' -or
+    $_.TaskName -like 'PlatformExperiencesHelper_*'
+})
 $tasksPending = @($tasksAll | Where-Object { $_.State -ne 'Disabled' }).Count
 $drvPending = 0
 foreach ($n in 'AMDRyzenMasterDriverV29','AMDRyzenMasterDriverV32') {
@@ -1317,7 +1324,7 @@ $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $apKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
 $runReg = Get-Item -LiteralPath $runKey -ErrorAction SilentlyContinue
 $apAtual = Get-ItemProperty -LiteralPath $apKey -ErrorAction SilentlyContinue
-$runItems = @(if ($runReg) { $runReg.GetValueNames() | Where-Object { $_ -in @('RazerAppEngine','AMDNoiseSuppression') } } else { @() })
+$runItems = @(if ($runReg) { $runReg.GetValueNames() | Where-Object { $_ -in @('RazerAppEngine','AMDNoiseSuppression') -or $_ -like 'GoogleUpdaterTaskUser*' } } else { @() })
 $runPending = @($runItems | Where-Object { -not ($apAtual -and $null -ne $apAtual.$_ -and ([int]@($apAtual.$_)[0] -band 1)) }).Count
 $total = $svcAll.Count + $tasksAll.Count + $runItems.Count
 $pend = $svcPending + $tasksPending + $drvPending + $amdPending + $runPending
@@ -1347,7 +1354,14 @@ Write-Output "$pend/$total"
         let script = r#"
 $names = @('AMD Crash Defender Service','Razer Game Manager Service 3','Razer Update Service','MSI_Case_Service','MSI_Center_Service','amd3dvcacheSvc','AsusUpdateCheck')
 $found = @(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | Where-Object { $names -contains $_.Name -or $_.Name -like 'GoogleUpdaterService*' -or $_.Name -like 'GoogleUpdaterInternalService*' } | Where-Object { $_.StartMode -ne 'Disabled' })
-$tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { ($_.TaskName -in @('AMDRyzenMasterSDKTask','AMD Install Manager - Check For Updates','StartDVR','StartCN') -or $_.TaskName -like 'GoogleUpdaterTaskSystem*') -and $_.State -ne 'Disabled' })
+$tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
+    ($_.TaskName -in @('AMDRyzenMasterSDKTask','AMD Install Manager - Check For Updates','AMDInstallLauncher','StartDVR','StartCN') -or
+    $_.TaskName -like 'GoogleUpdaterTaskSystem*' -or
+    $_.TaskName -like 'GoogleUpdaterTaskUser*' -or
+    $_.TaskName -like 'NvDriverUpdateCheckDaily*' -or
+    $_.TaskName -like 'NVIDIA App SelfUpdate*' -or
+    $_.TaskName -like 'PlatformExperiencesHelper_*') -and $_.State -ne 'Disabled'
+})
 $drivers = @(foreach ($n in 'AMDRyzenMasterDriverV29','AMDRyzenMasterDriverV32') {
     $st = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$n" -Name Start -ErrorAction SilentlyContinue).Start
     if ($null -ne $st -and $st -lt 4) { [pscustomobject]@{ Name=$n; Start=$st } }
@@ -1358,7 +1372,7 @@ $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $apKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
 $runReg = Get-Item -LiteralPath $runKey -ErrorAction SilentlyContinue
 $apAtual = Get-ItemProperty -LiteralPath $apKey -ErrorAction SilentlyContinue
-$runItems = @(if ($runReg) { $runReg.GetValueNames() | Where-Object { $_ -in @('RazerAppEngine','AMDNoiseSuppression') } |
+$runItems = @(if ($runReg) { $runReg.GetValueNames() | Where-Object { $_ -in @('RazerAppEngine','AMDNoiseSuppression') -or $_ -like 'GoogleUpdaterTaskUser*' } |
     Where-Object { -not ($apAtual -and $null -ne $apAtual.$_ -and ([int]@($apAtual.$_)[0] -band 1)) } })
 
 $snap = [ordered]@{
@@ -2763,9 +2777,13 @@ impl UsbAudioMsiModeTweak {
                 let dev_path = format!(r"{v_path}\{device}");
                 let class_guid = match read_value(RegHive::Hklm, &dev_path, "ClassGUID") {
                     Ok(Some(RegValue::String(s))) => s.to_ascii_lowercase(),
-                    _ => continue,
+                    _ => String::new(),
                 };
-                if !USB_AUDIO_MSI_CLASSES.contains(&class_guid.as_str()) {
+                let is_hdaudbus = matches!(
+                    read_value(RegHive::Hklm, &dev_path, "Service"),
+                    Ok(Some(RegValue::String(s))) if s.eq_ignore_ascii_case("hdaudbus")
+                );
+                if !USB_AUDIO_MSI_CLASSES.contains(&class_guid.as_str()) && !is_hdaudbus {
                     continue;
                 }
                 let msi_path = format!(
@@ -3304,6 +3322,442 @@ impl Tweak for NicPowerMgmtTweak {
         Ok(format!(
             "PnPCapabilities restaurado ao padrão em {} adaptador(es).",
             targets.len()
+        ))
+    }
+}
+
+const EDGE_POLICY_KEY: &str = r"SOFTWARE\Policies\Microsoft\Edge";
+const HKCU_RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+const EDGE_POLICY_NAMES: &[&str] = &[
+    "StartupBoostEnabled",
+    "BackgroundModeEnabled",
+    "HubsSidebarEnabled",
+    "EdgeShoppingAssistantEnabled",
+];
+
+pub struct EdgeBackgroundTweak {
+    meta: TweakMeta,
+}
+
+impl EdgeBackgroundTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "bloat.edge_background_off",
+                name: "Microsoft Edge: Desativar Startup Boost, modo em 2º plano e barra lateral",
+                category: Category::PrivacyBloat,
+                risk: RiskLevel::Low,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Impede que o Microsoft Edge pré-carregue no boot (Startup Boost), remove MicrosoftEdgeAutoLaunch_* do Run e desativa execução em 2º plano após fechar, economizando ~150–250 MB de RAM. O navegador continua funcionando normalmente ao abrir.",
+                details: vec![
+                    format!(r"HKLM\{EDGE_POLICY_KEY}: StartupBoostEnabled=0, BackgroundModeEnabled=0, HubsSidebarEnabled=0, EdgeShoppingAssistantEnabled=0"),
+                    format!(r"HKCU\{HKCU_RUN_KEY}\MicrosoftEdgeAutoLaunch_* -> REMOVIDO (com backup)"),
+                ],
+            },
+        }
+    }
+
+    fn edge_autolaunch_names() -> Vec<String> {
+        list_value_names(RegHive::Hkcu, HKCU_RUN_KEY)
+            .into_iter()
+            .filter(|n| n.starts_with("MicrosoftEdgeAutoLaunch_"))
+            .collect()
+    }
+}
+
+impl Tweak for EdgeBackgroundTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let mut ok = 0usize;
+        for name in EDGE_POLICY_NAMES {
+            if matches!(read_value(RegHive::Hklm, EDGE_POLICY_KEY, name), Ok(Some(RegValue::DWord(0)))) {
+                ok += 1;
+            }
+        }
+        let autolaunch = Self::edge_autolaunch_names();
+        let total = EDGE_POLICY_NAMES.len() + usize::from(!autolaunch.is_empty());
+        if autolaunch.is_empty() && ok == EDGE_POLICY_NAMES.len() {
+            TweakStatus::Applied
+        } else if ok == 0 {
+            TweakStatus::NotApplied
+        } else {
+            TweakStatus::Partial(format!("{ok}/{total} itens"))
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let mut snap = Vec::new();
+        for &name in EDGE_POLICY_NAMES {
+            let cur = read_value(RegHive::Hklm, EDGE_POLICY_KEY, name)?;
+            snap.push(RegSnapshotEntry {
+                hive: RegHive::Hklm,
+                subkey: EDGE_POLICY_KEY.into(),
+                name: name.into(),
+                existed: cur.is_some(),
+                value: cur,
+                use_backup_restore: false,
+            });
+        }
+        let autolaunch = Self::edge_autolaunch_names();
+        for name in &autolaunch {
+            let cur = read_value(RegHive::Hkcu, HKCU_RUN_KEY, name)?;
+            snap.push(RegSnapshotEntry {
+                hive: RegHive::Hkcu,
+                subkey: HKCU_RUN_KEY.into(),
+                name: name.clone(),
+                existed: cur.is_some(),
+                value: cur,
+                use_backup_restore: false,
+            });
+        }
+        let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        for (modified, &name) in EDGE_POLICY_NAMES.iter().enumerate() {
+            if let Err(e) = write_value(RegHive::Hklm, EDGE_POLICY_KEY, name, &RegValue::DWord(0)) {
+                if created && modified == 0 {
+                    let _ = backups.remove(self.meta.id);
+                }
+                return Err(e);
+            }
+        }
+        for name in &autolaunch {
+            delete_value(RegHive::Hkcu, HKCU_RUN_KEY, name)?;
+        }
+        Ok(format!(
+            "Políticas do Edge aplicadas ({} autolaunch removido(s)).",
+            autolaunch.len()
+        ))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup do Microsoft Edge encontrado.".into());
+        };
+        let snap: Vec<RegSnapshotEntry> =
+            serde_json::from_value(rec.data).map_err(|e| e.to_string())?;
+        for e in &snap {
+            if e.existed {
+                if let Some(v) = &e.value {
+                    write_value(e.hive, &e.subkey, &e.name, v)?;
+                }
+            } else {
+                delete_value(e.hive, &e.subkey, &e.name)?;
+            }
+        }
+        backups.remove(self.meta.id)?;
+        Ok("Configurações do Microsoft Edge restauradas.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        for &name in EDGE_POLICY_NAMES {
+            delete_value(RegHive::Hklm, EDGE_POLICY_KEY, name)?;
+        }
+        Ok("Políticas do Microsoft Edge removidas (padrão do Windows).".into())
+    }
+}
+
+pub struct NvidiaHdcpOffTweak {
+    meta: TweakMeta,
+}
+
+impl NvidiaHdcpOffTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "gpu.nvidia_hdcp_off",
+                name: "GPU NVIDIA: Desativar HDCP (RMHdcpKeyglobZero=1)",
+                category: Category::GpuLatency,
+                risk: RiskLevel::Medium,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Define RMHdcpKeyglobZero=1 no driver NVIDIA para eliminar handshakes HDCP em Alt-Tab e trocas de resolução em tela cheia. Atenção: serviços de streaming 4K com DRM (Netflix, Prime Video, Disney+) exigem HDCP ativado.",
+                details: vec![
+                    format!(r"HKLM\{GPU_CLASS_KEY}\00xx\RMHdcpKeyglobZero = 1 (VEN_10DE)"),
+                ],
+            },
+        }
+    }
+}
+
+impl Tweak for NvidiaHdcpOffTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let keys = NvidiaDynamicPstateTweak::nvidia_keys();
+        if keys.is_empty() {
+            return TweakStatus::NotApplicable("Nenhuma GPU NVIDIA (VEN_10DE) detectada".into());
+        }
+        let ok = keys
+            .iter()
+            .filter(|k| {
+                matches!(
+                    read_value(RegHive::Hklm, k, "RMHdcpKeyglobZero"),
+                    Ok(Some(RegValue::DWord(1)))
+                )
+            })
+            .count();
+        if ok == keys.len() {
+            TweakStatus::Applied
+        } else if ok == 0 {
+            TweakStatus::NotApplied
+        } else {
+            TweakStatus::Partial(format!("{ok}/{} GPUs NVIDIA", keys.len()))
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let keys = NvidiaDynamicPstateTweak::nvidia_keys();
+        if keys.is_empty() {
+            return Err("Nenhuma GPU NVIDIA instalada neste PC.".into());
+        }
+        let mut snap = Vec::new();
+        for k in &keys {
+            let cur = read_value(RegHive::Hklm, k, "RMHdcpKeyglobZero")?;
+            snap.push(RegSnapshotEntry {
+                hive: RegHive::Hklm,
+                subkey: k.clone(),
+                name: "RMHdcpKeyglobZero".into(),
+                existed: cur.is_some(),
+                value: cur,
+                use_backup_restore: false,
+            });
+        }
+        let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        for (modified, k) in keys.iter().enumerate() {
+            if let Err(e) = write_value(
+                RegHive::Hklm,
+                k,
+                "RMHdcpKeyglobZero",
+                &RegValue::DWord(1),
+            ) {
+                if created && modified == 0 {
+                    let _ = backups.remove(self.meta.id);
+                }
+                return Err(e);
+            }
+        }
+        Ok(format!(
+            "RMHdcpKeyglobZero=1 aplicado em {} GPU(s) NVIDIA (reinicie para valer).",
+            keys.len()
+        ))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de RMHdcpKeyglobZero encontrado.".into());
+        };
+        let snap: Vec<RegSnapshotEntry> =
+            serde_json::from_value(rec.data).map_err(|e| e.to_string())?;
+        for e in &snap {
+            if e.existed {
+                if let Some(v) = &e.value {
+                    write_value(e.hive, &e.subkey, &e.name, v)?;
+                }
+            } else {
+                delete_value(e.hive, &e.subkey, &e.name)?;
+            }
+        }
+        backups.remove(self.meta.id)?;
+        Ok("RMHdcpKeyglobZero restaurado ao padrão.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        for k in NvidiaDynamicPstateTweak::nvidia_keys() {
+            delete_value(RegHive::Hklm, &k, "RMHdcpKeyglobZero")?;
+        }
+        Ok("RMHdcpKeyglobZero removido (HDCP padrão do driver NVIDIA).".into())
+    }
+}
+
+pub struct DefenderGameExclusionsTweak {
+    meta: TweakMeta,
+}
+
+impl DefenderGameExclusionsTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "sys.defender_game_exclusions",
+                name: "Windows Defender: Exclusões automáticas para pastas de jogos e cache de shaders",
+                category: Category::SystemKernel,
+                risk: RiskLevel::Low,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Adiciona exclusões oficiais (Add-MpPreference) somente para pastas de bibliotecas de jogos existentes (Steam, Epic, Riot, EA, Ubisoft, Battle.net, XboxGames) e caches de shaders NVIDIA/AMD/DirectX, reduzindo micro-stutters de I/O sem desligar o antivírus.",
+                details: vec![
+                    "Escaneia discos locais fixos (Steam, SteamLibrary, Epic, Riot, EA, Ubisoft, Battle.net, XboxGames)".into(),
+                    "Inclui caches de shaders (NVIDIA\\DXCache, NVIDIA\\GLCache, NVIDIA\\NV_Cache, AMD\\DxCache, D3DSCache)".into(),
+                ],
+            },
+        }
+    }
+
+    const CANDIDATE_SCRIPT: &'static str = r#"
+$cands = @()
+$fixed = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue | ForEach-Object { $_.DeviceID })
+$rels = @(
+    'Program Files (x86)\Steam\steamapps',
+    'SteamLibrary\steamapps',
+    'Program Files\Epic Games',
+    'Epic Games',
+    'Riot Games',
+    'Program Files\EA Games',
+    'EA Games',
+    'Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games',
+    'Program Files (x86)\Battle.net',
+    'Games',
+    'XboxGames'
+)
+foreach ($d in $fixed) {
+    foreach ($r in $rels) {
+        $p = Join-Path "$d\" $r
+        if (Test-Path -LiteralPath $p) { $cands += $p }
+    }
+}
+foreach ($p in @(
+    (Join-Path $env:LOCALAPPDATA 'NVIDIA\DXCache'),
+    (Join-Path $env:LOCALAPPDATA 'NVIDIA\GLCache'),
+    (Join-Path $env:LOCALAPPDATA 'AMD\DxCache'),
+    (Join-Path $env:LOCALAPPDATA 'D3DSCache'),
+    'C:\ProgramData\NVIDIA Corporation\NV_Cache'
+)) {
+    if ($p -and (Test-Path -LiteralPath $p)) { $cands += $p }
+}
+$cands = @($cands | ForEach-Object { $_.TrimEnd('\') } | Select-Object -Unique)
+"#;
+}
+
+impl Tweak for DefenderGameExclusionsTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        if !crate::sys::elevation::is_elevated() {
+            return TweakStatus::NotApplicable("Requer Admin para verificar".into());
+        }
+        let script = format!(
+            r#"
+$wd = Get-Service WinDefend -ErrorAction SilentlyContinue
+if (-not $wd -or $wd.Status -ne 'Running') {{ Write-Output 'NO_DEFENDER'; exit 0 }}
+{}
+if (-not $cands.Count) {{ Write-Output 'NONE'; exit 0 }}
+$excl = @((Get-MpPreference -ErrorAction Stop).ExclusionPath | ForEach-Object {{ "$_".TrimEnd('\').ToLowerInvariant() }})
+$ok = @($cands | Where-Object {{ $excl -contains $_.ToLowerInvariant() }}).Count
+Write-Output "$ok/$($cands.Count)"
+"#,
+            Self::CANDIDATE_SCRIPT
+        );
+        match run_powershell_checked(&script) {
+            Ok(out) => {
+                let s = out.stdout.trim();
+                if s == "NO_DEFENDER" {
+                    TweakStatus::NotApplicable("Windows Defender não está ativo".into())
+                } else if s == "NONE" {
+                    TweakStatus::NotApplicable("Nenhuma pasta de jogos/shaders detectada".into())
+                } else if let Some((a, b)) = s.split_once('/') {
+                    let ok: usize = a.parse().unwrap_or(0);
+                    let total: usize = b.parse().unwrap_or(0);
+                    if total == 0 {
+                        TweakStatus::NotApplicable("Nenhuma pasta alvo".into())
+                    } else if ok == total {
+                        TweakStatus::Applied
+                    } else if ok == 0 {
+                        TweakStatus::NotApplied
+                    } else {
+                        TweakStatus::Partial(format!("{ok}/{total} pastas"))
+                    }
+                } else {
+                    TweakStatus::Error(s.to_string())
+                }
+            }
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let query = format!(
+            r#"
+$wd = Get-Service WinDefend -ErrorAction SilentlyContinue
+if (-not $wd -or $wd.Status -ne 'Running') {{ Write-Output '[]'; exit 0 }}
+{}
+$excl = @((Get-MpPreference -ErrorAction Stop).ExclusionPath | ForEach-Object {{ "$_".TrimEnd('\').ToLowerInvariant() }})
+$toAdd = @($cands | Where-Object {{ $excl -notcontains $_.ToLowerInvariant() }})
+if ($toAdd.Count) {{ ConvertTo-Json -InputObject @($toAdd) -Compress }} else {{ '[]' }}
+"#,
+            Self::CANDIDATE_SCRIPT
+        );
+        let out = run_powershell_checked(&query)?;
+        let to_add: Vec<String> =
+            serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
+        if to_add.is_empty() {
+            return Ok("Todas as pastas de jogos/shaders já estão excluídas (ou Defender inativo).".into());
+        }
+        let json = serde_json::to_value(&to_add).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        let escaped = serde_json::to_string(&to_add)
+            .map_err(|e| e.to_string())?
+            .replace('\'', "''");
+        let apply_script = format!(
+            r#"
+$paths = [string[]]@((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }} | Where-Object {{ $_ }})
+if ($paths.Count) {{ Add-MpPreference -ExclusionPath $paths -ErrorAction Stop }}
+"#
+        );
+        match run_powershell_checked(&apply_script) {
+            Ok(_) => Ok(format!(
+                "{} pasta(s) de jogos/shaders adicionada(s) às exclusões do Defender.",
+                to_add.len()
+            )),
+            Err(e) => {
+                if created {
+                    let _ = backups.remove(self.meta.id);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de exclusões do Defender encontrado.".into());
+        };
+        let paths: Vec<String> =
+            serde_json::from_value(rec.data).map_err(|e| format!("Backup inválido: {e}"))?;
+        if !paths.is_empty() {
+            let escaped = serde_json::to_string(&paths)
+                .map_err(|e| e.to_string())?
+                .replace('\'', "''");
+            let script = format!(
+                r#"
+$paths = [string[]]@((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }} | Where-Object {{ $_ }})
+if ($paths.Count) {{ Remove-MpPreference -ExclusionPath $paths -ErrorAction SilentlyContinue }}
+"#
+            );
+            run_powershell_checked(&script)?;
+        }
+        backups.remove(self.meta.id)?;
+        Ok(format!(
+            "{} exclusão(ões) do Defender removida(s).",
+            paths.len()
         ))
     }
 }

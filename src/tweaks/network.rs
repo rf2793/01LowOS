@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::sys::backup::BackupStore;
 use crate::sys::cmd::run_powershell_checked;
-use crate::sys::registry::{read_value, write_value, RegHive, RegValue};
+use crate::sys::registry::{delete_value, read_value, write_value, RegHive, RegValue};
 use crate::tweaks::{Category, RiskLevel, Tweak, TweakMeta, TweakStatus};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -627,5 +627,188 @@ impl Tweak for WinInetWpadTweak {
         }
         backups.remove(self.meta.id)?;
         Ok("Blobs WinINet originais restaurados.".into())
+    }
+}
+
+const AFD_PARAMS_KEY: &str = r"SYSTEM\CurrentControlSet\Services\AFD\Parameters";
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RscUdpBackup {
+    rsc_before: String,
+    pcf_before: String,
+    rsc_adapters: Vec<String>,
+    fast_send_existed: bool,
+    fast_send_val: Option<RegValue>,
+}
+
+pub struct NetRscUdpLatencyTweak {
+    meta: TweakMeta,
+}
+
+impl NetRscUdpLatencyTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "net.rsc_udp_latency",
+                name: "Rede: Desativar RSC, Packet Coalescing e ativar UDP FastSend (AFD)",
+                category: Category::Network,
+                risk: RiskLevel::Low,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Desativa Receive Segment Coalescing (RSC) e Packet Coalescing Filter para eliminar atraso por agrupamento de pacotes, e define AFD\\Parameters\\FastSendDatagramThreshold=1500 para caminho rápido de datagramas UDP em jogos online.",
+                details: vec![
+                    "netsh int tcp set global rsc=disabled".into(),
+                    "Set-NetOffloadGlobalSetting -PacketCoalescingFilter Disabled".into(),
+                    "Disable-NetAdapterRsc nos adaptadores físicos".into(),
+                    r"HKLM\SYSTEM\CurrentControlSet\Services\AFD\Parameters\FastSendDatagramThreshold = 1500".into(),
+                ],
+            },
+        }
+    }
+}
+
+impl Tweak for NetRscUdpLatencyTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let script = r#"
+$g = Get-NetOffloadGlobalSetting -ErrorAction SilentlyContinue
+if (-not $g) { Write-Output 'ERR'; exit 0 }
+$rscOff = if ("$($g.ReceiveSegmentCoalescing)" -eq 'Disabled') { 1 } else { 0 }
+$pcfOff = if ("$($g.PacketCoalescingFilter)" -eq 'Disabled') { 1 } else { 0 }
+Write-Output "$rscOff,$pcfOff"
+"#;
+        let net_ok = match run_powershell_checked(script) {
+            Ok(out) => {
+                let s = out.stdout.trim();
+                if s == "ERR" {
+                    return TweakStatus::Error("Get-NetOffloadGlobalSetting indisponível".into());
+                }
+                let mut parts = s.split(',');
+                let a: usize = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                let b: usize = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                a + b
+            }
+            Err(e) => return TweakStatus::Error(e),
+        };
+        let afd_ok = usize::from(matches!(
+            read_value(RegHive::Hklm, AFD_PARAMS_KEY, "FastSendDatagramThreshold"),
+            Ok(Some(RegValue::DWord(1500)))
+        ));
+        let total = net_ok + afd_ok;
+        match total {
+            3 => TweakStatus::Applied,
+            0 => TweakStatus::NotApplied,
+            n => TweakStatus::Partial(format!("{n}/3 ajustes")),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let query = r#"
+$g = Get-NetOffloadGlobalSetting -ErrorAction Stop
+$rscAdapters = @(Get-NetAdapterRsc -ErrorAction SilentlyContinue | Where-Object { $_.IPv4Enabled -or $_.IPv6Enabled } | ForEach-Object { $_.Name })
+[pscustomobject]@{
+    rsc_before = [string]$g.ReceiveSegmentCoalescing
+    pcf_before = [string]$g.PacketCoalescingFilter
+    rsc_adapters = @($rscAdapters)
+} | ConvertTo-Json -Depth 3 -Compress
+"#;
+        let out = run_powershell_checked(query)?;
+        let val: serde_json::Value =
+            serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
+        let cur_afd = read_value(RegHive::Hklm, AFD_PARAMS_KEY, "FastSendDatagramThreshold")?;
+        let snap = RscUdpBackup {
+            rsc_before: val["rsc_before"].as_str().unwrap_or("Enabled").to_string(),
+            pcf_before: val["pcf_before"].as_str().unwrap_or("Enabled").to_string(),
+            rsc_adapters: val["rsc_adapters"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default(),
+            fast_send_existed: cur_afd.is_some(),
+            fast_send_val: cur_afd,
+        };
+        let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        let apply_script = r#"
+netsh int tcp set global rsc=disabled | Out-Null
+Set-NetOffloadGlobalSetting -PacketCoalescingFilter Disabled -ErrorAction Stop
+Get-NetAdapter -Physical -ErrorAction SilentlyContinue | ForEach-Object {
+    Disable-NetAdapterRsc -Name $_.Name -ErrorAction SilentlyContinue
+}
+"#;
+        if let Err(e) = run_powershell_checked(apply_script) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
+        write_value(
+            RegHive::Hklm,
+            AFD_PARAMS_KEY,
+            "FastSendDatagramThreshold",
+            &RegValue::DWord(1500),
+        )?;
+        Ok("RSC e Packet Coalescing desativados; UDP FastSend (1500) ativado.".into())
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de RSC/UDP encontrado.".into());
+        };
+        let snap: RscUdpBackup =
+            serde_json::from_value(rec.data).map_err(|e| format!("Backup inválido: {e}"))?;
+        let rsc_arg = if snap.rsc_before.eq_ignore_ascii_case("Disabled") {
+            "disabled"
+        } else {
+            "enabled"
+        };
+        let pcf_arg = if snap.pcf_before.eq_ignore_ascii_case("Disabled") {
+            "Disabled"
+        } else {
+            "Enabled"
+        };
+        let adapters_json = serde_json::to_string(&snap.rsc_adapters)
+            .map_err(|e| e.to_string())?
+            .replace('\'', "''");
+        let script = format!(
+            r#"
+netsh int tcp set global rsc={rsc_arg} | Out-Null
+Set-NetOffloadGlobalSetting -PacketCoalescingFilter {pcf_arg} -ErrorAction Stop
+$nics = @((ConvertFrom-Json '{adapters_json}') | ForEach-Object {{ $_ }} | Where-Object {{ $_ }})
+foreach ($n in $nics) {{
+    Enable-NetAdapterRsc -Name $n -ErrorAction SilentlyContinue
+}}
+"#
+        );
+        run_powershell_checked(&script)?;
+        if snap.fast_send_existed {
+            if let Some(v) = &snap.fast_send_val {
+                write_value(RegHive::Hklm, AFD_PARAMS_KEY, "FastSendDatagramThreshold", v)?;
+            }
+        } else {
+            delete_value(RegHive::Hklm, AFD_PARAMS_KEY, "FastSendDatagramThreshold")?;
+        }
+        backups.remove(self.meta.id)?;
+        Ok("RSC, Packet Coalescing e UDP FastSend restaurados.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        let script = r#"
+netsh int tcp set global rsc=enabled | Out-Null
+Set-NetOffloadGlobalSetting -PacketCoalescingFilter Enabled -ErrorAction Stop
+Get-NetAdapter -Physical -ErrorAction SilentlyContinue | ForEach-Object {
+    Enable-NetAdapterRsc -Name $_.Name -ErrorAction SilentlyContinue
+}
+"#;
+        run_powershell_checked(script)?;
+        delete_value(RegHive::Hklm, AFD_PARAMS_KEY, "FastSendDatagramThreshold")?;
+        Ok("RSC, Packet Coalescing e AFD restaurados para o padrão do Windows.".into())
     }
 }

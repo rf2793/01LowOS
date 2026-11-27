@@ -1,6 +1,6 @@
 # 01LowOS — Otimizador Modular para Windows 11 em Rust
 
-Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL-3.0), para gerenciar, aplicar, verificar e reverter **individualmente** **70 otimizações** de latência, GPU, rede, energia, privacidade e serviços no Windows 11 (`24H2` / `25H2` / `26H1`), com snapshot e backup atômico por ajuste.
+Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL-3.0), para gerenciar, aplicar, verificar e reverter **individualmente** **77 otimizações** de latência, GPU, rede, energia, privacidade e serviços no Windows 11 (`24H2` / `25H2` / `26H1`), com snapshot e backup atômico por ajuste.
 
 - **Download do executável (Releases):** https://github.com/rf2793/01LowOS/releases
 - **Reportar problemas:** https://github.com/rf2793/01LowOS/issues
@@ -8,7 +8,7 @@ Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL
 
 ## Destaques
 
-1. **Melhorias Individuais (70 ajustes granulares)**:
+1. **Melhorias Individuais (77 ajustes granulares)**:
    - Organizadas por categoria (`GPU & Latência`, `Sistema & Kernel`, `Energia`, `Rede`, `Usuário (HKCU)`, `Privacidade & Bloat`, `Serviços Windows`, `Terceiros`, `Tarefas Agendadas`, `ETW Autologgers`).
    - Cada melhoria grava snapshot do estado original em `C:\ProgramData\01LowOS\Backups\tweaks\<id>.json` (ou `%LOCALAPPDATA%\01LowOS\Backups\tweaks\` sem elevação) antes de alterar o sistema.
    - Barra de progresso ao vivo, **Preset Jogos Seguro (1-clique)**, **Selecionar todas**, presets salváveis, tooltips explicativos, botão **Detalhes** e reversão unitária/total (**Reverter** / **Padrão Win**).
