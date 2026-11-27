@@ -4,6 +4,7 @@ pub mod network;
 pub mod power;
 pub mod registry_tweak;
 pub mod service_tweak;
+pub mod ssd_only;
 pub mod task_tweak;
 
 use crate::sys::backup::BackupStore;

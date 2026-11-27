@@ -23,6 +23,7 @@ use crate::tweaks::power::{
 };
 use crate::tweaks::registry_tweak::{RegOp, RegistryTweak};
 use crate::tweaks::service_tweak::{ServiceGroupTweak, ServiceTarget};
+use crate::tweaks::ssd_only::SsdOnlyTweak;
 use crate::tweaks::task_tweak::{ScheduledTaskGroupTweak, TaskPattern};
 use crate::tweaks::{Category, RiskLevel, Tweak, TweakMeta};
 
@@ -459,7 +460,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         vec![RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager", "DisableWpbtExecution")],
     )));
 
-    list.push(Box::new(RegistryTweak::with_defaults(
+    // PC-Tuning: so desativar Prefetch/Superfetch quando nao ha HDD (SsdOnlyTweak vira N/A com HDD).
+    list.push(Box::new(SsdOnlyTweak::new(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "sys.prefetcher_off",
             name: "NVMe/SSD: Desativar Prefetcher e Superfetch (EnablePrefetcher=0)",
@@ -467,7 +469,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             risk: RiskLevel::Low,
             requires_reboot: true,
             requires_admin: true,
-            description: "Define EnablePrefetcher=0 e EnableSuperfetch=0 em PrefetchParameters, evitando gravações de arquivos .pf no NVMe/SSD sem benefício em armazenamento flash.",
+            description: "Define EnablePrefetcher=0 e EnableSuperfetch=0 em PrefetchParameters, evitando gravacoes de arquivos .pf no NVMe/SSD sem beneficio em armazenamento flash. Fica N/A se houver HD mecanico, onde o Prefetch acelera o carregamento.",
             details: vec![],
         },
         vec![
@@ -478,7 +480,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters", "EnablePrefetcher", dw(3)),
             RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters", "EnableSuperfetch"),
         ],
-    )));
+    )))));
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
@@ -1631,7 +1633,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             risk: RiskLevel::Medium,
             requires_reboot: true,
             requires_admin: true,
-            description: "Desativa Temas, Serviço de Armazenamento, Superfetch/SysMain, Uso de Dados (DusmSvc) e driver de contagem de dados (Ndu).",
+            description: "Desativa Temas, Servico de Armazenamento, Superfetch/SysMain, Uso de Dados (DusmSvc) e driver de contagem de dados (Ndu). Atencao: com jogos em HD mecanico o SysMain acelera o carregamento; nesse caso nao aplique.",
             details: vec![],
         },
         vec![
