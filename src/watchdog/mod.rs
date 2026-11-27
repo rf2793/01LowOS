@@ -63,6 +63,14 @@ pub const IDLE_BG: &[&str] = &[
     "ArmouryCrate.UserSessionHelper",
     "EpicWebHelper",
     "GalaxyCommunication",
+    "Corsair.Service.CpuIdRemote64",
+    "iCUE",
+    "lghub_agent",
+    "lghub_updater",
+    "SteelSeriesGG",
+    "CCXProcess",
+    "AdobeUpdateService",
+    "GCC",
 ];
 
 pub const BELOW_NORMAL_BG: &[&str] = &["EALocalHostSvc", "Discord", "Spotify"];
@@ -127,6 +135,12 @@ pub const NEVER_TOUCH: &[&str] = &[
     "NoPing",
     "GearUP",
     "VirtualDesktop.Streamer",
+    "PnkBstrA",
+    "PnkBstrB",
+    "SGuard64",
+    "SGuardSvc64",
+    "GameMon",
+    "GameMon64",
 ];
 
 const IGNORED_LIBRARY_TOOLS: &[&str] = &[

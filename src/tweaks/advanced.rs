@@ -193,11 +193,11 @@ impl Tweak for MemoryCompressionTweak {
 
     fn apply(&self, backups: &BackupStore) -> Result<String, String> {
         let was_enabled = Self::is_enabled()?;
-        let json = serde_json::json!({ "memory_compression": was_enabled });
-        let created = backups.save_if_absent(self.meta.id, json)?;
         if !was_enabled {
             return Ok("Compressão de memória já estava desativada.".into());
         }
+        let json = serde_json::json!({ "memory_compression": was_enabled });
+        let created = backups.save_if_absent(self.meta.id, json)?;
         if let Err(e) = run_powershell_checked(
             "Start-Service SysMain -ErrorAction SilentlyContinue; Disable-MMAgent -MemoryCompression -ErrorAction Stop",
         ) {
@@ -238,6 +238,7 @@ impl Tweak for MemoryCompressionTweak {
 }
 
 const ETW_AUTOLOGGERS: &[&str] = &[
+    "AutoLogger-Diagtrack-Listener",
     "Diagtrack-Listener",
     "DiagLog",
     "WdiContextLog",
@@ -257,6 +258,10 @@ const ETW_AUTOLOGGERS: &[&str] = &[
     "NtfsLog",
     "FilterMgr-Logger",
     "CimFSUnionFS-Filter",
+    "ReadyBoot",
+    "ScreenOnPowerStudyTraceSession",
+    "CloudExperienceHostOobe",
+    "SQMLogger",
 ];
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -274,12 +279,12 @@ impl EtwAutologgerTweak {
         Self {
             meta: TweakMeta {
                 id: "etw.autologgers_off",
-                name: "Desativar 19 sessões de rastreamento ETW (Autologger)",
+                name: "Desativar 24 sessões de rastreamento ETW (Autologger)",
                 category: Category::EtwAutologgers,
                 risk: RiskLevel::Medium,
                 requires_reboot: true,
                 requires_admin: true,
-                description: "Define Start=0 via REG_OPTION_BACKUP_RESTORE nos Autologgers não essenciais (telemetria, rede, Wi-Fi, EventLog, Defender) e envia logman stop. Preserva UBPM e Circular Kernel Context Logger.",
+                description: "Define Start=0 via REG_OPTION_BACKUP_RESTORE nos Autologgers não essenciais (incluindo AutoLogger-Diagtrack-Listener, ReadyBoot, ScreenOnPowerStudyTraceSession, CloudExperienceHostOobe, SQMLogger, rede, Wi-Fi, EventLog e Defender) e envia logman stop. Preserva UBPM e Circular Kernel Context Logger.",
                 details: ETW_AUTOLOGGERS
                     .iter()
                     .map(|n| format!("Autologger\\{n}\\Start = 0"))
@@ -370,6 +375,9 @@ impl Tweak for EtwAutologgerTweak {
                 continue;
             }
             let _ = run_hidden("logman.exe", &["stop", name, "-ets"]);
+            if *name == "AutoLogger-Diagtrack-Listener" {
+                let _ = run_hidden("logman.exe", &["stop", "Diagtrack-Listener", "-ets"]);
+            }
         }
         if errs.is_empty() {
             Ok(format!("{} Autologger(s) desativado(s) (vale completo no boot).", targets.len()))
@@ -1184,8 +1192,12 @@ impl Tweak for PresentMonFpsTweak {
         let script = r#"
 $g = Get-LocalGroup | Where-Object { $_.SID -eq 'S-1-5-32-559' } | Select-Object -First 1
 if (-not $g) { Write-Output 'NA'; exit 0 }
+$usersGroup = $null
+try {
+    $usersGroup = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')).Translate([System.Security.Principal.NTAccount]).Value
+} catch {}
 $members = @(Get-LocalGroupMember -Group $g.Name -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
-$ok = ($members -match '\\Users$|\\Gamer$' -or $members -contains "$env:COMPUTERNAME\$env:USERNAME").Count -gt 0
+$ok = ($members -match '\\Users$|\\Usuários$|\\Gamer$' -or ($usersGroup -and ($members -contains $usersGroup)) -or $members -contains "$env:USERDOMAIN\$env:USERNAME" -or $members -contains "$env:COMPUTERNAME\$env:USERNAME").Count -gt 0
 Write-Output $ok
 "#;
         match run_powershell_checked(script) {
@@ -1207,8 +1219,13 @@ Write-Output $ok
         let script = r#"
 $g = Get-LocalGroup | Where-Object { $_.SID -eq 'S-1-5-32-559' } | Select-Object -First 1
 if (-not $g) { throw 'Grupo Performance Log Users (S-1-5-32-559) não encontrado.' }
+$usersGroup = 'Users'
+try {
+    $usersGroup = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')).Translate([System.Security.Principal.NTAccount]).Value
+} catch {}
 $added = @()
-foreach ($m in @('Users', 'Gamer', "$env:USERDOMAIN\$env:USERNAME")) {
+$candidates = @($usersGroup, 'Gamer', "$env:USERDOMAIN\$env:USERNAME") | Where-Object { $_ } | Select-Object -Unique
+foreach ($m in $candidates) {
     try {
         Add-LocalGroupMember -Group $g.Name -Member $m -ErrorAction Stop
         $added += $m
@@ -1277,15 +1294,15 @@ impl ThirdPartyBloatTweak {
         Self {
             meta: TweakMeta {
                 id: "svc.third_party_bloat",
-                name: "Terceiros: Desativar serviços, tarefas e updates (AMD, Razer, MSI, ASUS, Google)",
+                name: "Terceiros: Desativar serviços, tarefas e updates (AMD, Razer, MSI, ASUS, Google, Adobe, Intel DSA)",
                 category: Category::ThirdParty,
                 risk: RiskLevel::Low,
                 requires_reboot: false,
                 requires_admin: true,
-                description: "Desativa itens de atualização/telemetria de terceiros (Crash Defender, Razer Game Manager/Update, MSI Center, amd3dvcacheSvc, AsusUpdateCheck, GoogleUpdater, NvDriverUpdateCheckDaily, NVIDIA App SelfUpdate, PlatformExperiencesHelper, StartCN/StartDVR, StartupApproved Razer/AMDNoiseSuppression/GoogleUpdater). Mantém Synapse/External Events utilizáveis manualmente.",
+                description: "Desativa itens de atualização/telemetria de terceiros (Crash Defender, Razer Game Manager/Update, MSI Center, amd3dvcacheSvc, AsusUpdateCheck, GoogleUpdater, AdobeARMservice/AGSService, Intel DSAService/DSAUpdateService, NvDriverUpdateCheckDaily, NVIDIA App SelfUpdate, PlatformExperiencesHelper, StartCN/StartDVR, StartupApproved Razer/AMDNoiseSuppression/GoogleUpdaterTaskUser). Mantém Synapse/External Events utilizáveis manualmente.",
                 details: vec![
-                    "Serviços: AMD Crash Defender, Razer Game Manager 3/Update, MSI_Case/Center, amd3dvcacheSvc, AsusUpdateCheck, GoogleUpdater*".into(),
-                    "Tarefas: AMDRyzenMasterSDKTask, AMD Check For Updates, AMDInstallLauncher, StartDVR, StartCN, NvDriverUpdateCheckDaily*, NVIDIA App SelfUpdate*, PlatformExperiencesHelper_*, GoogleUpdaterTaskSystem/User*".into(),
+                    "Serviços: AMD Crash Defender, Razer Game Manager 3/Update, MSI_Case/Center, amd3dvcacheSvc, AsusUpdateCheck, GoogleUpdater*, AdobeARMservice, AGSService, DSAService, DSAUpdateService".into(),
+                    "Tarefas: AMDRyzenMasterSDKTask, AMD Check For Updates, AMDInstallLauncher, StartDVR, StartCN, NvDriverUpdateCheckDaily*, NVIDIA App SelfUpdate*, PlatformExperiencesHelper_*, GoogleUpdaterTaskSystem/User*, Adobe Acrobat Update Task*, AdobeGCInvoker*".into(),
                     "Drivers Ryzen Master V29/V32 Start=4, AMD DisableAutoUpdates=1, StartupApproved RazerAppEngine/AMDNoiseSuppression/GoogleUpdaterTaskUser*".into(),
                 ],
             },
@@ -1300,7 +1317,7 @@ impl Tweak for ThirdPartyBloatTweak {
 
     fn check(&self) -> TweakStatus {
         let script = r#"
-$names = @('AMD Crash Defender Service','Razer Game Manager Service 3','Razer Update Service','MSI_Case_Service','MSI_Center_Service','amd3dvcacheSvc','AsusUpdateCheck')
+$names = @('AMD Crash Defender Service','Razer Game Manager Service 3','Razer Update Service','MSI_Case_Service','MSI_Center_Service','amd3dvcacheSvc','AsusUpdateCheck','AdobeARMservice','AGSService','DSAService','DSAUpdateService')
 $svcAll = @(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | Where-Object { $names -contains $_.Name -or $_.Name -like 'GoogleUpdaterService*' -or $_.Name -like 'GoogleUpdaterInternalService*' })
 $svcPending = @($svcAll | Where-Object { $_.StartMode -ne 'Disabled' }).Count
 $tasksAll = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
@@ -1309,7 +1326,9 @@ $tasksAll = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
     $_.TaskName -like 'GoogleUpdaterTaskUser*' -or
     $_.TaskName -like 'NvDriverUpdateCheckDaily*' -or
     $_.TaskName -like 'NVIDIA App SelfUpdate*' -or
-    $_.TaskName -like 'PlatformExperiencesHelper_*'
+    $_.TaskName -like 'PlatformExperiencesHelper_*' -or
+    $_.TaskName -like 'Adobe Acrobat Update Task*' -or
+    $_.TaskName -like 'AdobeGCInvoker*'
 })
 $tasksPending = @($tasksAll | Where-Object { $_.State -ne 'Disabled' }).Count
 $drvPending = 0
@@ -1356,8 +1375,8 @@ Write-Output "$pend/$total"
     }
 
     fn apply(&self, backups: &BackupStore) -> Result<String, String> {
-        let script = r#"
-$names = @('AMD Crash Defender Service','Razer Game Manager Service 3','Razer Update Service','MSI_Case_Service','MSI_Center_Service','amd3dvcacheSvc','AsusUpdateCheck')
+        let query_script = r#"
+$names = @('AMD Crash Defender Service','Razer Game Manager Service 3','Razer Update Service','MSI_Case_Service','MSI_Center_Service','amd3dvcacheSvc','AsusUpdateCheck','AdobeARMservice','AGSService','DSAService','DSAUpdateService')
 $found = @(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | Where-Object { $names -contains $_.Name -or $_.Name -like 'GoogleUpdaterService*' -or $_.Name -like 'GoogleUpdaterInternalService*' } | Where-Object { $_.StartMode -ne 'Disabled' })
 $tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
     ($_.TaskName -in @('AMDRyzenMasterSDKTask','AMD Install Manager - Check For Updates','AMDInstallLauncher','StartDVR','StartCN') -or
@@ -1365,7 +1384,9 @@ $tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
     $_.TaskName -like 'GoogleUpdaterTaskUser*' -or
     $_.TaskName -like 'NvDriverUpdateCheckDaily*' -or
     $_.TaskName -like 'NVIDIA App SelfUpdate*' -or
-    $_.TaskName -like 'PlatformExperiencesHelper_*') -and $_.State -ne 'Disabled'
+    $_.TaskName -like 'PlatformExperiencesHelper_*' -or
+    $_.TaskName -like 'Adobe Acrobat Update Task*' -or
+    $_.TaskName -like 'AdobeGCInvoker*') -and $_.State -ne 'Disabled'
 })
 $drivers = @(foreach ($n in 'AMDRyzenMasterDriverV29','AMDRyzenMasterDriverV32') {
     $st = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$n" -Name Start -ErrorAction SilentlyContinue).Start
@@ -1387,27 +1408,9 @@ $snap = [ordered]@{
     amd = @($amdAuto | ForEach-Object { [pscustomobject]@{ DisableAutoUpdates=$_.DisableAutoUpdates } })
     drivers = @($drivers)
 }
-
-foreach ($d in $drivers) { Set-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$($d.Name)" -Name Start -Value 4 -Type DWord -ErrorAction Stop }
-if ($amdAuto.Count) { Set-ItemProperty -LiteralPath $amdKey -Name DisableAutoUpdates -Value 1 -Type DWord -ErrorAction Stop }
-foreach ($s in $found) {
-    Set-Service -Name $s.Name -StartupType Disabled -ErrorAction Stop
-    Stop-Service -Name $s.Name -Force -ErrorAction SilentlyContinue
-}
-foreach ($t in $tasks) {
-    Stop-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction SilentlyContinue
-    Disable-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction Stop | Out-Null
-    Get-Process cpumetricsserver -ErrorAction SilentlyContinue | Stop-Process -Force
-    if ($t.TaskName -eq 'StartCN') { Get-Process RadeonSoftware -ErrorAction SilentlyContinue | Stop-Process -Force }
-}
-foreach ($n in $runItems) {
-    if (-not (Test-Path -LiteralPath $apKey)) { New-Item -Path $apKey -Force | Out-Null }
-    New-ItemProperty -LiteralPath $apKey -Name $n -Value ([byte[]](3,0,0,0,0,0,0,0,0,0,0,0)) -PropertyType Binary -Force | Out-Null
-}
-Get-Process AMDInstallManager -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 $snap | ConvertTo-Json -Depth 4 -Compress
 "#;
-        let out = run_powershell_checked(script)?;
+        let out = run_powershell_checked(query_script)?;
         let val: serde_json::Value =
             serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
         let count = val["servicos"].as_array().map(|a| a.len()).unwrap_or(0)
@@ -1415,8 +1418,50 @@ $snap | ConvertTo-Json -Depth 4 -Compress
             + val["inicializacao"].as_array().map(|a| a.len()).unwrap_or(0)
             + val["drivers"].as_array().map(|a| a.len()).unwrap_or(0)
             + val["amd"].as_array().map(|a| a.len()).unwrap_or(0);
-        if count > 0 {
-            backups.save_if_absent(self.meta.id, val)?;
+        if count == 0 {
+            return Ok("0 item(ns) de terceiros pendentes.".into());
+        }
+        let created = backups.save_if_absent(self.meta.id, val.clone())?;
+        let escaped = serde_json::to_string(&val)
+            .map_err(|e| e.to_string())?
+            .replace('\'', "''");
+        let apply_script = format!(
+            r#"
+$snap = ConvertFrom-Json '{escaped}'
+$amdKey = 'HKLM:\SOFTWARE\AMD\AMDInstallManager\AutoUpdate'
+$apKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+foreach ($d in @($snap.drivers)) {{
+    if (-not $d.Name) {{ continue }}
+    Set-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$($d.Name)" -Name Start -Value 4 -Type DWord -ErrorAction Stop
+}}
+if (@($snap.amd).Count) {{
+    Set-ItemProperty -LiteralPath $amdKey -Name DisableAutoUpdates -Value 1 -Type DWord -ErrorAction Stop
+}}
+foreach ($s in @($snap.servicos)) {{
+    if (-not $s.Name) {{ continue }}
+    Set-Service -Name $s.Name -StartupType Disabled -ErrorAction Stop
+    Stop-Service -Name $s.Name -Force -ErrorAction SilentlyContinue
+}}
+foreach ($t in @($snap.tarefas)) {{
+    if (-not $t.TaskName) {{ continue }}
+    Stop-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction SilentlyContinue
+    Disable-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction Stop | Out-Null
+    Get-Process cpumetricsserver -ErrorAction SilentlyContinue | Stop-Process -Force
+    if ($t.TaskName -eq 'StartCN') {{ Get-Process RadeonSoftware -ErrorAction SilentlyContinue | Stop-Process -Force }}
+}}
+foreach ($i in @($snap.inicializacao)) {{
+    if (-not $i.Name) {{ continue }}
+    if (-not (Test-Path -LiteralPath $apKey)) {{ New-Item -Path $apKey -Force | Out-Null }}
+    New-ItemProperty -LiteralPath $apKey -Name $i.Name -Value ([byte[]](3,0,0,0,0,0,0,0,0,0,0,0)) -PropertyType Binary -Force | Out-Null
+}}
+Get-Process AMDInstallManager -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+"#
+        );
+        if let Err(e) = run_powershell_checked(&apply_script) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
         }
         Ok(format!("{count} item(ns) de terceiros desativado(s)."))
     }
@@ -4381,14 +4426,14 @@ impl Tweak for MmAgentPrelaunchTweak {
 
     fn apply(&self, backups: &BackupStore) -> Result<String, String> {
         let (prelaunch, page_combining) = Self::query_flags()?;
+        if !prelaunch && !page_combining {
+            return Ok("ApplicationPreLaunch e PageCombining já estavam desativados.".into());
+        }
         let json = serde_json::json!({
             "application_prelaunch": prelaunch,
             "page_combining": page_combining,
         });
         let created = backups.save_if_absent(self.meta.id, json)?;
-        if !prelaunch && !page_combining {
-            return Ok("ApplicationPreLaunch e PageCombining já estavam desativados.".into());
-        }
         if let Err(e) = run_powershell_checked(
             "Start-Service SysMain -ErrorAction SilentlyContinue; Disable-MMAgent -ApplicationPreLaunch -PageCombining -ErrorAction Stop",
         ) {
@@ -4823,5 +4868,116 @@ Write-Output "$($st.State)"
             "Set-WindowsReservedStorageState -State Enabled -ErrorAction Stop | Out-Null",
         )?;
         Ok("Armazenamento Reservado do Windows restaurado ao padrão (Enabled).".into())
+    }
+}
+
+pub struct HypervisorOffTweak {
+    meta: TweakMeta,
+}
+
+impl HypervisorOffTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "sys.hypervisor_off",
+                name: "BCD / Virtualização: Desativar inicialização do Hipervisor (hypervisorlaunchtype off)",
+                category: Category::SystemKernel,
+                risk: RiskLevel::High,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Define bcdedit /set {current} hypervisorlaunchtype off para eliminar a camada de virtualização/VBS residual no Windows 11 24H2/25H2 (ganho real em 1% low e jogos CPU-bound). Atenção: desativa WSL2, Hyper-V, Docker Desktop e Windows Sandbox até reverter para 'auto'.",
+                details: vec![
+                    "bcdedit /set {current} hypervisorlaunchtype off (reversível para valor original ou auto)".into(),
+                ],
+            },
+        }
+    }
+
+    fn query_launch_type() -> Result<Option<String>, String> {
+        let out = crate::sys::cmd::run_hidden_checked("bcdedit.exe", &["/enum", "{current}"], &[0])?;
+        for line in out.stdout.lines() {
+            let mut parts = line.split_whitespace();
+            let Some(key) = parts.next() else {
+                continue;
+            };
+            if key.eq_ignore_ascii_case("hypervisorlaunchtype") {
+                let val = parts.collect::<Vec<_>>().join(" ");
+                return Ok(if val.is_empty() { None } else { Some(val) });
+            }
+        }
+        Ok(None)
+    }
+}
+
+impl Tweak for HypervisorOffTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        if !crate::sys::elevation::is_elevated() {
+            return TweakStatus::NotApplicable("Requer Admin para verificar".into());
+        }
+        match Self::query_launch_type() {
+            Ok(Some(v)) if v.eq_ignore_ascii_case("off") => TweakStatus::Applied,
+            Ok(_) => TweakStatus::NotApplied,
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let prev = Self::query_launch_type()?;
+        if prev.as_deref().is_some_and(|v| v.eq_ignore_ascii_case("off")) {
+            return Ok("Hipervisor já está desativado (hypervisorlaunchtype off).".into());
+        }
+        let created = backups.save_if_absent(
+            self.meta.id,
+            serde_json::json!({ "previous": prev }),
+        )?;
+        if let Err(e) = crate::sys::cmd::run_hidden_checked(
+            "bcdedit.exe",
+            &["/set", "{current}", "hypervisorlaunchtype", "off"],
+            &[0],
+        ) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
+        Ok("hypervisorlaunchtype definido para off (reinicie para aplicar).".into())
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de hypervisorlaunchtype encontrado.".into());
+        };
+        if let Some(prev) = rec.data["previous"].as_str().filter(|s| !s.is_empty()) {
+            crate::sys::cmd::run_hidden_checked(
+                "bcdedit.exe",
+                &["/set", "{current}", "hypervisorlaunchtype", prev],
+                &[0],
+            )?;
+        } else {
+            crate::sys::cmd::run_hidden_checked(
+                "bcdedit.exe",
+                &["/deletevalue", "{current}", "hypervisorlaunchtype"],
+                &[0],
+            )?;
+        }
+        backups.remove(self.meta.id)?;
+        Ok("hypervisorlaunchtype restaurado ao valor original.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        crate::sys::cmd::run_hidden_checked(
+            "bcdedit.exe",
+            &["/set", "{current}", "hypervisorlaunchtype", "auto"],
+            &[0],
+        )?;
+        Ok("hypervisorlaunchtype restaurado para auto (padrão do Windows).".into())
     }
 }

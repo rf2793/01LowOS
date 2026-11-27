@@ -142,11 +142,6 @@ impl Tweak for ScheduledTaskGroupTweak {
             return Ok("Nenhuma tarefa correspondente instalada.".into());
         }
 
-        let snapshot: Vec<TaskSnapshotEntry> = tasks.iter().map(|(e, _, _)| e.clone()).collect();
-        let json = serde_json::to_value(&snapshot)
-            .map_err(|e| format!("Falha ao serializar tarefas: {e}"))?;
-        let created_backup = backups.save_if_absent(self.meta.id, json)?;
-
         let items: Vec<String> = tasks
             .iter()
             .filter(|(e, _, _)| e.enabled)
@@ -167,6 +162,11 @@ impl Tweak for ScheduledTaskGroupTweak {
                 tasks.len()
             ));
         }
+
+        let snapshot: Vec<TaskSnapshotEntry> = tasks.iter().map(|(e, _, _)| e.clone()).collect();
+        let json = serde_json::to_value(&snapshot)
+            .map_err(|e| format!("Falha ao serializar tarefas: {e}"))?;
+        let created_backup = backups.save_if_absent(self.meta.id, json)?;
 
         let script = format!(
             r#"

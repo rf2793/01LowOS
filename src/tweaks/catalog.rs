@@ -5,12 +5,12 @@ use crate::tweaks::advanced::{
     ActionCenterSsoTweak, AmdShaderCacheTweak, AmdUlpsOffTweak, AudioEnhancementsTweak,
     BcdCleanTimersTweak, CloudflareDnsTweak, ConsumerAppxTweak, DefenderGameExclusionsTweak,
     DefenderScanThrottleTweak, EdgeBackgroundTweak, EtwAutologgerTweak, FirewallOrphansTweak,
-    GpuNicMsiModeTweak, HdAudioIdleOffTweak, LegacyHardwareIrqTweak, MemoryCompressionTweak,
-    MmAgentPrelaunchTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak, NvidiaHdcpOffTweak,
-    NvidiaTelemetryTweak, NvmeStorageMsiTweak, OptionalFeaturesTweak, PnpUnusedDevicesTweak,
-    PresentMonFpsTweak, ReservedStorageOffTweak, SmartScreenAclTweak, SystemAppxTweak,
-    TcpNagleTweak, ThirdPartyBloatTweak, UsbAudioMsiModeTweak, UsbD3SuspendTweak,
-    UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
+    GpuNicMsiModeTweak, HdAudioIdleOffTweak, HypervisorOffTweak, LegacyHardwareIrqTweak,
+    MemoryCompressionTweak, MmAgentPrelaunchTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak,
+    NvidiaHdcpOffTweak, NvidiaTelemetryTweak, NvmeStorageMsiTweak, OptionalFeaturesTweak,
+    PnpUnusedDevicesTweak, PresentMonFpsTweak, ReservedStorageOffTweak, SmartScreenAclTweak,
+    SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak, UsbAudioMsiModeTweak,
+    UsbD3SuspendTweak, UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
 };
 use crate::tweaks::network::{
     NetBiosOffTweak, NetQosNicFlowTweak, NetRscUdpLatencyTweak, NetTcpBbr2Tweak, NicBindingsTweak,
@@ -33,7 +33,7 @@ fn sz(v: &str) -> RegValue {
 }
 
 pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
-    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(110);
+    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(112);
 
     // 1. GPU & LATÊNCIA
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -114,8 +114,16 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\GameDVR", "AllowGameDVR", dw(0)),
         ],
         vec![
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\GameBar", "UseNexusForGameBarEnabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\GameBar", "ShowStartupPanel", dw(1)),
             RegOp::set(RegHive::Hkcu, r"System\GameConfigStore", "GameDVR_Enabled", dw(1)),
+            RegOp::delete(RegHive::Hkcu, r"System\GameConfigStore", "GameDVR_FSEBehavior"),
+            RegOp::set(RegHive::Hkcu, r"System\GameConfigStore", "GameDVR_FSEBehaviorMode", dw(2)),
+            RegOp::set(RegHive::Hkcu, r"System\GameConfigStore", "GameDVR_HonorUserFSEBehaviorMode", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"System\GameConfigStore", "GameDVR_DXGIHonorFSEWindowsCompatible", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"System\GameConfigStore", "GameDVR_EFSEFeatureFlags", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\GameDVR", "AppCaptureEnabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\GameDVR", "HistoricalCaptureEnabled", dw(0)),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\GameDVR", "AllowGameDVR"),
         ],
     )));
@@ -141,7 +149,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         ],
     )));
 
-    list.push(Box::new(RegistryTweak::new(
+    list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "gpu.mmcss_games",
             name: "Perfil MMCSS padrão validado para jogos",
@@ -152,6 +160,12 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             description: "Define SystemResponsiveness=20, NetworkThrottlingIndex=10, Scheduling Category=Medium e Priority=2 (evita sufocar threads de rede/sistema).",
             details: vec![],
         },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "SystemResponsiveness", dw(20)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "NetworkThrottlingIndex", dw(10)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games", "Scheduling Category", sz("Medium")),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games", "Priority", dw(2)),
+        ],
         vec![
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "SystemResponsiveness", dw(20)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", "NetworkThrottlingIndex", dw(10)),
@@ -262,6 +276,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Lsa", "LsaCfgFlags"),
         ],
     )));
+
+    list.push(Box::new(HypervisorOffTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
@@ -858,6 +874,39 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
+            id: "user.nearby_speech_siuf_off",
+            name: "Privacidade Win11 (HKCU): Sem Feedback SIUF, Fala Online, Nearby Sharing, Home Settings e Recomendações",
+            category: Category::UserHkcu,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: false,
+            description: "Desativa pedidos de feedback (SIUF=0), reconhecimento de fala online, coleta de contatos para digitação, Compartilhamento por Proximidade/CDP, diagnóstico de apps, recomendações do Menu Iniciar e a aba promocional 'Início' das Configurações (Win11 24H2/25H2).",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Siuf\Rules", "NumberOfSIUFInPeriod", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy", "HasAccepted", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\InputPersonalization\TrainedDataStore", "HarvestContacts", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CDP", "CdpSessionUserAuthzPolicy", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CDP", "NearShareChannelUserAuthzPolicy", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\appDiagnostics", "Value", sz("Deny")),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_Recommended", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "SettingsPageVisibility", sz("hide:home")),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hkcu, r"Software\Microsoft\Siuf\Rules", "NumberOfSIUFInPeriod"),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy", "HasAccepted", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\InputPersonalization\TrainedDataStore", "HarvestContacts", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CDP", "CdpSessionUserAuthzPolicy", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CDP", "NearShareChannelUserAuthzPolicy", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\appDiagnostics", "Value", sz("Allow")),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_Recommended", dw(1)),
+            RegOp::delete(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "SettingsPageVisibility"),
+        ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
             id: "user.sound_scheme_none",
             name: "Áudio: Esquema de sons do Windows em Sem Som (.None)",
             category: Category::UserHkcu,
@@ -905,6 +954,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DriverSearching", "DontSearchWindowsUpdate"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DriverSearching", "DriverUpdateWizardWuSearchEnabled"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Device Metadata", "PreventDeviceMetadataFromNetwork"),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Device Metadata", "PreventDeviceMetadataFromNetwork", dw(0)),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization", "DODownloadMode"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "AllowTelemetry"),
         ],
@@ -939,6 +989,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Paint", "DisableCocreator", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Paint", "DisableGenerativeFill", dw(1)),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Dsh", "AllowNewsAndInterests", dw(0)),
+            RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Dsh", "DisableWidgetsOnLockScreen", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Feeds", "EnableFeeds", dw(0)),
             RegOp::set_opt(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "TaskbarDa", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Policies\Microsoft\Windows\Explorer", "DisableSearchBoxSuggestions", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "AllowCortana", dw(0)),
@@ -969,6 +1021,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Paint", "DisableCocreator"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Paint", "DisableGenerativeFill"),
             RegOp::delete_opt(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Dsh", "AllowNewsAndInterests"),
+            RegOp::delete_opt(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Dsh", "DisableWidgetsOnLockScreen"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Feeds", "EnableFeeds"),
             RegOp::set_opt(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "TaskbarDa", dw(1)),
             RegOp::delete(RegHive::Hkcu, r"Software\Policies\Microsoft\Windows\Explorer", "DisableSearchBoxSuggestions"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "AllowCortana"),
@@ -981,6 +1035,21 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Explorer", "NoUseStoreOpenWith"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "DisableDiagnosticDataViewer"),
         ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "bloat.store_autoupdate_off",
+            name: "Microsoft Store: Desativar downloads automáticos em 2º plano (AutoDownload=2)",
+            category: Category::PrivacyBloat,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Define Policies\\Microsoft\\WindowsStore\\AutoDownload=2 para impedir que a Microsoft Store baixe e descompacte atualizações de apps silenciosamente durante partidas (evitando picos de ping, CPU e disco). A loja, Xbox App e Game Pass continuam 100% funcionais para downloads manuais.",
+            details: vec![],
+        },
+        vec![RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\WindowsStore", "AutoDownload", dw(2))],
+        vec![RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\WindowsStore", "AutoDownload")],
     )));
 
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -1148,7 +1217,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         ],
     )));
 
-    list.push(Box::new(RegistryTweak::new(
+    list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
             id: "bloat.telemetry_restore_wer",
             name: "Políticas: Desativar System Restore, WER, Localização, Sync, Ink e Shell órfãos",
@@ -1190,6 +1259,37 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}", sz("")),
             RegOp::set_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{09A47860-11B0-4DA5-AFA5-26D86198A780}", sz("")),
         ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore", "DisableSR"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "AllowClipboardHistory"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "AllowCrossDeviceClipboard"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting", "Disabled"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\Windows Error Reporting", "Disabled"),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Remote Assistance", "fAllowToGetHelp", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Remote Assistance", "fAllowFullControl", dw(0)),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\SystemCertificates\AuthRoot", "EnableDisallowedCertAutoUpdate"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "EnableActivityFeed"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "PublishUserActivities"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "UploadUserActivities"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo", "DisabledByGroupPolicy"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors", "DisableLocation"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors", "DisableLocationScripting"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors", "DisableWindowsLocationProvider"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\SettingSync", "DisableSettingSync"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\SettingSync", "DisableSettingSyncUserOverride"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\WindowsInkWorkspace", "AllowWindowsInkWorkspace"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\InputPersonalization", "AllowInputPersonalization"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "EnableCdp"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "EnableFontProviders"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "DoNotShowFeedbackNotifications"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection", "MaxTelemetryAllowed"),
+            RegOp::delete_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{596AB062-B4D2-4215-9F74-E9109B0A8153}"),
+            RegOp::delete_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{7AD84985-87B4-4a16-BE58-8B72A5B390F7}"),
+            RegOp::delete_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{f81e9010-6ea4-11ce-a7ff-00aa003ca9f6}"),
+            RegOp::delete_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{e2bf9676-5f8f-435c-97eb-11607a5bedf7}"),
+            RegOp::delete_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}"),
+            RegOp::delete_opt(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", "{09A47860-11B0-4DA5-AFA5-26D86198A780}"),
+        ],
     )));
 
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -1200,12 +1300,14 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             risk: RiskLevel::Low,
             requires_reboot: true,
             requires_admin: true,
-            description: "Desativa Manutenção Automática em 2º plano, Storage Sense, bloqueio global de apps UWP em 2º plano (LetAppsRunInBackground=2), CrossDevice Resume, amostragem de energia SRUM (EnergyEstimationEnabled=0) e atraso de logon.",
+            description: "Desativa Manutenção Automática em 2º plano, Storage Sense (HKCU + política GPO HKLM), bloqueio global de apps UWP em 2º plano (LetAppsRunInBackground=2), CrossDevice Resume, amostragem de energia SRUM (EnergyEstimationEnabled=0) e atraso de logon.",
             details: vec![],
         },
         vec![
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\Maintenance", "MaintenanceDisabled", dw(1)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy", "01", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\StorageSense", "AllowStorageSenseGlobal", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\StorageSense", "AllowStorageSenseTemporaryFilesCleanup", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsRunInBackground", dw(2)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CrossDeviceResume\Configuration", "IsResumeAllowed", dw(0)),
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Power", "EnergyEstimationEnabled", dw(0)),
@@ -1215,6 +1317,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
         vec![
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\Maintenance", "MaintenanceDisabled"),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy", "01", dw(1)),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\StorageSense", "AllowStorageSenseGlobal"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\StorageSense", "AllowStorageSenseTemporaryFilesCleanup"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy", "LetAppsRunInBackground"),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CrossDeviceResume\Configuration", "IsResumeAllowed", dw(1)),
             RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Power", "EnergyEstimationEnabled", dw(1)),
@@ -1728,7 +1832,9 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "user.explorer_gallery_quickaccess_clean",
     "user.audio_no_ducking",
     "user.privacy_hkcu",
+    "user.nearby_speech_siuf_off",
     "bloat.ai_search_cloud",
+    "bloat.store_autoupdate_off",
     "bloat.appcompat_sqm_telemetry",
     "bloat.edge_background_off",
     "bloat.browsers_bg_telemetry_off",
@@ -1759,8 +1865,33 @@ mod tests {
     #[test]
     fn catalog_ids_are_unique_and_non_empty() {
         let cat = build_catalog();
-        assert!(cat.len() >= 105);
+        assert!(cat.len() >= 108);
         validate_catalog(&cat).unwrap();
+    }
+
+    #[test]
+    fn catalog_has_no_conflicting_registry_keys() {
+        let cat = build_catalog();
+        let mut seen: std::collections::HashMap<String, &'static str> =
+            std::collections::HashMap::new();
+        for t in &cat {
+            let meta = t.meta();
+            for detail in &meta.details {
+                if (detail.starts_with("HKLM\\") || detail.starts_with("HKCU\\"))
+                    && detail.contains(" = ")
+                {
+                    if let Some((lhs, _)) = detail.split_once(" = ") {
+                        let key = lhs.trim().to_ascii_lowercase();
+                        if let Some(prev_id) = seen.insert(key.clone(), meta.id) {
+                            panic!(
+                                "Chave de registro duplicada '{key}' em '{}' e '{}'",
+                                prev_id, meta.id
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

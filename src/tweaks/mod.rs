@@ -163,6 +163,7 @@ pub fn run_self_test<F: FnMut(&str)>(
                         | "bloat.consumer_appx"
                         | "power.hiberfil_off"
                         | "sys.reserved_storage_off"
+                        | "sys.hypervisor_off"
                 ) =>
             {
                 Some("pesado (use --self-test-all)".into())

@@ -53,6 +53,13 @@ const POWER_SETTINGS: &[PowerSettingDef] = &[
 
 const EXTRA_POWER_SETTINGS: &[PowerSettingDef] = &[
     PowerSettingDef { name: "PERFINCPOL", subgroup: SUB_CPU, setting: "465e1f50-b610-473a-ab58-00d1077dc418", value: 2 },
+    PowerSettingDef { name: "PROCAUTONOMOUS", subgroup: SUB_CPU, setting: "8baa4a8a-14c6-4451-8e8b-14bdbd197537", value: 1 },
+    PowerSettingDef { name: "CPMINCORES1", subgroup: SUB_CPU, setting: "0cc5b647-c1df-4637-891a-dec35c318584", value: 100 },
+    PowerSettingDef { name: "CPMAXCORES1", subgroup: SUB_CPU, setting: "ea062031-0e34-4ff1-9b6d-eb1059334029", value: 100 },
+    PowerSettingDef { name: "PERFEPP1", subgroup: SUB_CPU, setting: "36687f9e-e3a5-4dbf-b1dc-15eb381c6864", value: 0 },
+    PowerSettingDef { name: "PROCTHROTTLEMIN1", subgroup: SUB_CPU, setting: "893dee8e-2bef-41e0-89c6-b55d0929964d", value: 100 },
+    PowerSettingDef { name: "PROCTHROTTLEMAX1", subgroup: SUB_CPU, setting: "bc5038f7-23e0-4960-96da-33abaf5935ed", value: 100 },
+    PowerSettingDef { name: "PERFINCPOL1", subgroup: SUB_CPU, setting: "465e1f50-b610-473a-ab58-00d1077dc419", value: 2 },
     PowerSettingDef { name: "NVMEIDLETIMEOUT2", subgroup: SUB_DISK, setting: "d3d55efd-c1ff-424e-9dc3-441be7833010", value: 0 },
     PowerSettingDef { name: "NVMELATENCYTOLERANCE2", subgroup: SUB_DISK, setting: "dbc9e238-6de9-49e3-92cd-8c2b4946b472", value: 0 },
     PowerSettingDef { name: "NVMENOPPME", subgroup: SUB_DISK, setting: "fc7372b6-ab2d-43ee-8797-15e9841f2cca", value: 0 },
@@ -128,7 +135,7 @@ impl PowerPlanTweak {
                 risk: RiskLevel::Low,
                 requires_reboot: false,
                 requires_admin: true,
-                description: "Clona o plano Alto Desempenho e aplica 20 parâmetros principais + 7 extras validados (CPPC 100%, CPU Rocket, C-states mantidos, ASPM/USB LPM/NVMe Primário+Secundário/NOPPME/AHCI LPM off, Wi-Fi Max Perf e sem suspensão).",
+                description: "Clona o plano Alto Desempenho e aplica 20 parâmetros principais + 14 extras validados (CPPC autônomo, Efficiency Class 1 para CPUs híbridas Intel, CPU Rocket, C-states mantidos, ASPM/USB LPM/NVMe Primário+Secundário/NOPPME/AHCI LPM off, Wi-Fi Max Perf e sem suspensão).",
                 details,
             },
         }
