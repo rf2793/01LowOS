@@ -191,6 +191,7 @@ pub struct ProcInfo {
     pub parent_pid: u32,
     pub name_stem: String,
     pub exe_path: Option<PathBuf>,
+    #[allow(dead_code)]
     pub session_id: u32,
 }
 

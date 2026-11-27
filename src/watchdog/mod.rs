@@ -39,41 +39,19 @@ pub const HEIRS: &[&str] = &[
 pub const IDLE_BG: &[&str] = &[
     "EACefSubProcess",
     "steamwebhelper",
-    "claude",
     "GoogleDriveFS",
     "SCSKiller",
-    "RadeonSoftware",
-    "msedgewebview2",
     "GoogleUpdater",
-    "Adguard",
-    "MSIAfterburner",
-    "rzappengine",
-    "RazerAppEngine",
     "OneDrive",
-    "Blitz",
-    "Overwolf",
-    "OverwolfBrowser",
-    "chrome",
-    "msedge",
-    "brave",
-    "opera",
-    "firefox",
-    "RZTHXHelper",
-    "AMDRSSrcExt",
-    "ArmouryCrate.UserSessionHelper",
+    "OneDrive.Sync.Service",
     "EpicWebHelper",
     "GalaxyCommunication",
-    "Corsair.Service.CpuIdRemote64",
-    "iCUE",
-    "lghub_agent",
-    "lghub_updater",
-    "SteelSeriesGG",
     "CCXProcess",
     "AdobeUpdateService",
-    "GCC",
+    "lghub_updater",
 ];
 
-pub const BELOW_NORMAL_BG: &[&str] = &["EALocalHostSvc", "Discord", "Spotify"];
+pub const BELOW_NORMAL_BG: &[&str] = &["EALocalHostSvc"];
 
 pub const PROTECTED_CORE0: &[&str] = &[
     "csrss",
@@ -93,7 +71,7 @@ pub const PROTECTED_CORE0: &[&str] = &[
     "dllhost",
     "RuntimeBroker",
     "conhost",
-    "audiodg",
+    "Discord",
     "SteamService",
     "gameoverlayui",
     "gameoverlayui64",
@@ -119,6 +97,14 @@ pub const NEVER_TOUCH: &[&str] = &[
     "vmwp",
     "vmcompute",
     "vmms",
+    "audiodg",
+    "Spotify",
+    "voicemeeter",
+    "voicemeeterpro",
+    "voicemeeter8",
+    "voicemeeter8x64",
+    "obs64",
+    "obs32",
     "EAAntiCheat.GameService",
     "EAAntiCheat.GameServiceLauncher",
     "EasyAntiCheat",
@@ -154,6 +140,35 @@ const IGNORED_LIBRARY_TOOLS: &[&str] = &[
     "DXSETUP",
     "UnityCrashHandler64",
     "UnityCrashHandler32",
+    "RiotClientCrashHandler",
+    "Riot Client",
+    "RiotClientUx",
+    "RiotClientUxRender",
+    "RiotClientServices",
+    "LeagueCrashHandler",
+    "LeagueCrashHandler64",
+    "LeagueClient",
+    "LeagueClientUx",
+    "LeagueClientUxRender",
+    "CrashReportClient",
+    "CrashReportClientEditor",
+    "CrashReporter",
+    "BsSndRpt",
+    "BsSndRpt64",
+    "sentry-crash",
+    "EpicWebHelper",
+    "UnrealCEFSubProcess",
+    "Battle.net",
+    "Agent",
+    "UplayWebCore",
+    "UbisoftGameLauncher",
+    "UbisoftGameLauncher64",
+    "EADesktop",
+    "EABackgroundService",
+    "EALauncher",
+    "EAAntiCheat.GameServiceLauncher",
+    "RockstarService",
+    "SocialClubHelper",
 ];
 
 fn default_purge_threshold_mb() -> u64 {
@@ -349,6 +364,15 @@ fn effective_folders(cfg: &WatchdogConfig) -> Vec<PathBuf> {
 }
 
 fn is_excluded_stem(stem: &str, cfg: &WatchdogConfig) -> bool {
+    let low = stem.to_ascii_lowercase();
+    if low.contains("crashhandler")
+        || low.contains("crashreporter")
+        || low.contains("crashpad")
+        || low.contains("errorreporter")
+        || low.contains("uninstall")
+    {
+        return true;
+    }
     matches_ci(NEVER_TOUCH, stem)
         || matches_ci(HEIRS, stem)
         || matches_ci(IDLE_BG, stem)
@@ -371,6 +395,10 @@ fn is_candidate_game_proc(
         return false;
     }
     if let Some(ref exe) = p.exe_path {
+        let exe_low = exe.to_string_lossy().to_ascii_lowercase();
+        if exe_low.contains(r"\riot client\") {
+            return false;
+        }
         return path_in_folders(exe, folders);
     }
     false
@@ -563,7 +591,6 @@ fn run_watchdog_loop(stop: Arc<AtomicBool>, snap: Arc<Mutex<WatchdogSnapshot>>) 
     let mut refused: HashSet<u32> = HashSet::new();
     let mut active_game_pid: Option<u32> = None;
     let mut active_game_name: Option<String> = None;
-    let mut active_game_session: u32 = 0;
     let mut sibling_stems: HashSet<String> = HashSet::new();
     let mut gpu_confirmed = false;
     let mut pdh_fail_streak = 0u32;
@@ -599,7 +626,6 @@ fn run_watchdog_loop(stop: Arc<AtomicBool>, snap: Arc<Mutex<WatchdogSnapshot>>) 
             {
                 active_game_pid = Some(sib.pid);
                 active_game_name = Some(sib.name_stem.clone());
-                active_game_session = sib.session_id;
                 game_alive = true;
             }
         }
@@ -611,7 +637,6 @@ fn run_watchdog_loop(stop: Arc<AtomicBool>, snap: Arc<Mutex<WatchdogSnapshot>>) 
             {
                 active_game_pid = Some(found.pid);
                 active_game_name = Some(found.name_stem.clone());
-                active_game_session = found.session_id;
                 gpu_confirmed = false;
                 sibling_stems = found
                     .exe_path
@@ -756,18 +781,8 @@ fn run_watchdog_loop(stop: Arc<AtomicBool>, snap: Arc<Mutex<WatchdogSnapshot>>) 
                     }
 
                     let desired_pri = match role {
-                        ProcRole::IdleBg if !cur_pri.is_high_or_realtime() => {
-                            Some(ProcPriority::Idle)
-                        }
-                        ProcRole::BelowNormalBg if !cur_pri.is_high_or_realtime() => {
-                            Some(ProcPriority::BelowNormal)
-                        }
-                        ProcRole::CommonOther
-                            if p.session_id == active_game_session
-                                && matches!(
-                                    cur_pri,
-                                    ProcPriority::Normal | ProcPriority::AboveNormal
-                                ) =>
+                        ProcRole::IdleBg | ProcRole::BelowNormalBg
+                            if !cur_pri.is_high_or_realtime() =>
                         {
                             Some(ProcPriority::BelowNormal)
                         }
@@ -1094,18 +1109,79 @@ mod tests {
         assert_eq!(classify_process("EasyAntiCheat_EOS"), ProcRole::NeverTouch);
         assert_eq!(classify_process("vmwp"), ProcRole::NeverTouch);
         assert_eq!(classify_process("System"), ProcRole::NeverTouch);
+        assert_eq!(classify_process("Spotify"), ProcRole::NeverTouch);
+        assert_eq!(classify_process("audiodg"), ProcRole::NeverTouch);
 
         assert_eq!(classify_process("steam"), ProcRole::Heir);
         assert_eq!(classify_process("Explorer"), ProcRole::Heir);
 
-        assert_eq!(classify_process("Discord"), ProcRole::BelowNormalBg);
-        assert_eq!(classify_process("Spotify"), ProcRole::BelowNormalBg);
-        assert_eq!(classify_process("steamwebhelper"), ProcRole::IdleBg);
+        assert_eq!(classify_process("Discord"), ProcRole::ProtectedCore0);
         assert_eq!(classify_process("dwm"), ProcRole::ProtectedCore0);
-        assert_eq!(classify_process("audiodg"), ProcRole::ProtectedCore0);
-        assert_eq!(classify_process("chrome"), ProcRole::IdleBg);
+        assert_eq!(classify_process("EALocalHostSvc"), ProcRole::BelowNormalBg);
+        assert_eq!(classify_process("steamwebhelper"), ProcRole::IdleBg);
+        assert_eq!(classify_process("chrome"), ProcRole::CommonOther);
         assert_eq!(classify_process("ExitLag"), ProcRole::NeverTouch);
         assert_eq!(classify_process("notepad"), ProcRole::CommonOther);
+    }
+
+    #[test]
+    fn riot_client_and_crash_handlers_are_never_detected_as_games() {
+        let folders = vec![
+            PathBuf::from(r"C:\Riot Games"),
+            PathBuf::from(r"C:\Riot Games\VALORANT"),
+            PathBuf::from(r"C:\Riot Games\League of Legends"),
+        ];
+        let cfg = WatchdogConfig::default();
+
+        let mk = |pid: u32, stem: &str, exe: &str| ProcInfo {
+            pid,
+            parent_pid: 100,
+            name_stem: stem.to_string(),
+            exe_path: Some(PathBuf::from(exe)),
+            session_id: 1,
+        };
+
+        assert!(!is_candidate_game_proc(
+            &mk(10, "RiotClientCrashHandler", r"C:\Riot Games\Riot Client\RiotClientCrashHandler.exe"),
+            &folders,
+            &cfg,
+            999,
+        ));
+        assert!(!is_candidate_game_proc(
+            &mk(11, "Riot Client", r"C:\Riot Games\Riot Client\RiotClientElectron\Riot Client.exe"),
+            &folders,
+            &cfg,
+            999,
+        ));
+        assert!(!is_candidate_game_proc(
+            &mk(12, "LeagueClientUxRender", r"C:\Riot Games\League of Legends\LeagueClientUxRender.exe"),
+            &folders,
+            &cfg,
+            999,
+        ));
+        assert!(!is_candidate_game_proc(
+            &mk(13, "LeagueCrashHandler64", r"C:\Riot Games\League of Legends\LeagueCrashHandler64.exe"),
+            &folders,
+            &cfg,
+            999,
+        ));
+
+        assert!(is_candidate_game_proc(
+            &mk(
+                20,
+                "VALORANT-Win64-Shipping",
+                r"C:\Riot Games\VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe",
+            ),
+            &folders,
+            &cfg,
+            999,
+        ));
+        assert!(is_candidate_game_proc(
+            &mk(21, "League of Legends", r"C:\Riot Games\League of Legends\Game\League of Legends.exe"),
+            &folders,
+            &cfg,
+            999,
+        ));
     }
 
     #[test]
