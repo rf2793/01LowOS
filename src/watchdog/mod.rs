@@ -296,6 +296,7 @@ impl Default for WatchdogSnapshot {
 }
 
 fn push_log(snap: &Arc<Mutex<WatchdogSnapshot>>, msg: String) {
+    crate::sys::logger::append_log(&format!("[Vigia] {msg}"));
     if let Ok(mut guard) = snap.lock() {
         let line = format!("{} {msg}", Local::now().format("%H:%M:%S"));
         guard.logs.push(line);

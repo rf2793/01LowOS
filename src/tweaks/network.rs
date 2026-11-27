@@ -228,12 +228,12 @@ impl Tweak for NicWolEeeTweak {
         let script = format!(
             r#"
 $keys = @({keywords})
-$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue)
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object {{ $_.Status -ne 'Not Present' }})
 $total = 0; $zero = 0
 foreach ($n in $nics) {{
-    foreach ($k in $keys) {{
-        $p = Get-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword $k -ErrorAction SilentlyContinue
-        if ($p -and (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0')) {{
+    $props = @(Get-NetAdapterAdvancedProperty -Name $n.Name -ErrorAction SilentlyContinue | Where-Object {{ $keys -contains $_.RegistryKeyword }})
+    foreach ($p in $props) {{
+        if (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0') {{
             $total++
             if ([string]@($p.RegistryValue)[0] -eq '0') {{ $zero++ }}
         }}
@@ -273,12 +273,12 @@ Write-Output "$zero/$total"
         let query = format!(
             r#"
 $keys = @({keywords})
-$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue)
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object {{ $_.Status -ne 'Not Present' }})
 $rows = foreach ($n in $nics) {{
-    foreach ($k in $keys) {{
-        $p = Get-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword $k -ErrorAction SilentlyContinue
-        if ($p -and (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0')) {{
-            [pscustomobject]@{{ nic = $n.Name; key = $k; val = [string]@($p.RegistryValue)[0] }}
+    $props = @(Get-NetAdapterAdvancedProperty -Name $n.Name -ErrorAction SilentlyContinue | Where-Object {{ $keys -contains $_.RegistryKeyword }})
+    foreach ($p in $props) {{
+        if (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0') {{
+            [pscustomobject]@{{ nic = $n.Name; key = $p.RegistryKeyword; val = [string]@($p.RegistryValue)[0] }}
         }}
     }}
 }}
@@ -297,18 +297,16 @@ if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
         let apply = format!(
             r#"
 $keys = @({keywords})
-$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue)
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object {{ $_.Status -ne 'Not Present' }})
 $cnt = 0
 foreach ($n in $nics) {{
-    foreach ($k in $keys) {{
-        $p = Get-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword $k -ErrorAction SilentlyContinue
-        if ($p -and (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0')) {{
+    $props = @(Get-NetAdapterAdvancedProperty -Name $n.Name -ErrorAction SilentlyContinue | Where-Object {{ $keys -contains $_.RegistryKeyword }})
+    foreach ($p in $props) {{
+        if (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0') {{
             try {{
-                Set-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword $k -RegistryValue 0 -NoRestart -ErrorAction Stop
+                Set-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword $p.RegistryKeyword -RegistryValue 0 -NoRestart -ErrorAction Stop
                 $cnt++
-            }} catch {{
-                if ($_.Exception.Message -notmatch 'ObjectNotFound|Nenhum objeto') {{ throw }}
-            }}
+            }} catch {{}}
         }}
     }}
 }}
@@ -865,12 +863,12 @@ impl Tweak for NetQosNicFlowTweak {
         let script = format!(
             r#"
 $keys = @({keywords})
-$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue)
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object {{ $_.Status -ne 'Not Present' }})
 $total = 0; $zero = 0
 foreach ($n in $nics) {{
-    foreach ($k in $keys) {{
-        $p = Get-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword $k -ErrorAction SilentlyContinue
-        if ($p -and (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0')) {{
+    $props = @(Get-NetAdapterAdvancedProperty -Name $n.Name -ErrorAction SilentlyContinue | Where-Object {{ $keys -contains $_.RegistryKeyword }})
+    foreach ($p in $props) {{
+        if (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0') {{
             $total++
             if ([string]@($p.RegistryValue)[0] -eq '0') {{ $zero++ }}
         }}
@@ -911,13 +909,13 @@ Write-Output "$zero/$total"
         let query = format!(
             r#"
 $keys = @({keywords})
-$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue)
+$nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object {{ $_.Status -ne 'Not Present' }})
 $rows = foreach ($n in $nics) {{
-    foreach ($k in $keys) {{
-        $p = Get-NetAdapterAdvancedProperty -Name $n.Name -RegistryKeyword $k -ErrorAction SilentlyContinue
-        if ($p -and (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0')) {{
+    $props = @(Get-NetAdapterAdvancedProperty -Name $n.Name -ErrorAction SilentlyContinue | Where-Object {{ $keys -contains $_.RegistryKeyword }})
+    foreach ($p in $props) {{
+        if (-not $p.ValidRegistryValues -or $p.ValidRegistryValues -contains '0') {{
             $cur = [string]@($p.RegistryValue)[0]
-            if ($cur -ne '0') {{ [pscustomobject]@{{ nic=$n.Name; key=$k; val=$cur }} }}
+            if ($cur -ne '0') {{ [pscustomobject]@{{ nic=$n.Name; key=$p.RegistryKeyword; val=$cur }} }}
         }}
     }}
 }}
@@ -947,6 +945,7 @@ if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
             return Err(e);
         }
 
+        let mut ok_count = 0usize;
         if !nic_rows.is_empty() {
             let escaped = serde_json::to_string(&nic_rows)
                 .map_err(|e| e.to_string())?
@@ -954,16 +953,21 @@ if ($rows) {{ ConvertTo-Json -InputObject @($rows) -Compress }} else {{ '[]' }}
             let apply_script = format!(
                 r#"
 $rows = @((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }})
+$ok = 0
 foreach ($r in $rows) {{
-    Set-NetAdapterAdvancedProperty -Name $r.nic -RegistryKeyword $r.key -RegistryValue 0 -NoRestart -ErrorAction Stop
+    try {{
+        Set-NetAdapterAdvancedProperty -Name $r.nic -RegistryKeyword $r.key -RegistryValue 0 -NoRestart -ErrorAction Stop
+        $ok++
+    }} catch {{}}
 }}
+Write-Output $ok
 "#
             );
-            run_powershell_checked(&apply_script)?;
+            let res = run_powershell_checked(&apply_script)?;
+            ok_count = res.stdout.trim().parse().unwrap_or(0);
         }
         Ok(format!(
-            "QoS NonBestEffortLimit=0 aplicado; {} propriedade(s) de Flow/Offload desativada(s).",
-            nic_rows.len()
+            "QoS NonBestEffortLimit=0 aplicado; {ok_count} propriedade(s) de Flow/Offload desativada(s)."
         ))
     }
 
@@ -989,7 +993,9 @@ foreach ($r in $rows) {{
 $rows = @((ConvertFrom-Json '{escaped}') | ForEach-Object {{ $_ }})
 foreach ($r in $rows) {{
     if (-not $r.key) {{ continue }}
-    Set-NetAdapterAdvancedProperty -Name $r.nic -RegistryKeyword $r.key -RegistryValue $r.val -NoRestart -ErrorAction Stop
+    try {{
+        Set-NetAdapterAdvancedProperty -Name $r.nic -RegistryKeyword $r.key -RegistryValue $r.val -NoRestart -ErrorAction Stop
+    }} catch {{}}
 }}
 "#
             );

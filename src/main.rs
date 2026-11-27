@@ -94,10 +94,12 @@ fn run_apply_or_revert(id: &str, mode: u8) -> i32 {
     };
     match res {
         Ok(msg) => {
+            crate::sys::logger::append_log(&format!("[CLI] OK [{id}]: {msg}"));
             println!("OK [{id}]: {msg}");
             0
         }
         Err(err) => {
+            crate::sys::logger::append_log(&format!("[CLI] ERRO [{id}]: {err}"));
             eprintln!("ERRO [{id}]: {err}");
             1
         }

@@ -12,6 +12,20 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                 app.trigger_refresh_backups(ctx);
             }
             if ui
+                .button("Abrir Log (.log)")
+                .on_hover_text("Abre o arquivo de log persistente do 01LowOS no Bloco de Notas")
+                .clicked()
+            {
+                match crate::sys::logger::open_log_file() {
+                    Ok(m) => {
+                        app.banner = Some((true, m));
+                    }
+                    Err(e) => {
+                        app.banner = Some((false, e));
+                    }
+                }
+            }
+            if ui
                 .button("Exportar Relatório (.txt)")
                 .on_hover_text(format!(
                     "Salva um relatório completo em texto com hardware e estado das {} otimizações",
@@ -205,7 +219,11 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     });
 
     ui.label(
-        RichText::new(format!("Diretório de backups: {}", app.backups.dir().display()))
+        RichText::new(format!(
+            "Diretório de backups: {}   |   Log: {}",
+            app.backups.dir().display(),
+            crate::sys::logger::log_file_path().display()
+        ))
             .small()
             .monospace()
             .color(Color32::from_rgb(148, 163, 184)),

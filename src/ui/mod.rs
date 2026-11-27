@@ -166,6 +166,11 @@ impl LowOsApp {
         .to_string_lossy()
         .to_string();
 
+        let init_msg = format!(
+            "01LowOS inicializado (Admin: {}).",
+            if elevated { "SIM" } else { "NÃO" }
+        );
+        crate::sys::logger::append_log(&init_msg);
         let mut app = Self {
             tab: Tab::Tweaks,
             elevated,
@@ -247,6 +252,7 @@ impl LowOsApp {
     }
 
     pub fn push_session_log(&mut self, msg: String) {
+        crate::sys::logger::append_log(&msg);
         self.session_logs
             .push(format!("{} {msg}", Local::now().format("%H:%M:%S")));
         if self.session_logs.len() > 400 {
