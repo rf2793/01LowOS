@@ -113,12 +113,15 @@ fn run_watchdog_headless() -> i32 {
     let alive = Arc::new(AtomicBool::new(true));
     let alive_cb = Arc::clone(&alive);
     let _tray = crate::sys::tray::TrayIcon::new(
-        "01LowOS — Vigia de Afinidade (Ativo)",
+        "01LowOS — Vigia + ISLC Ativo (Clique direito para abrir)",
         Arc::new(move |action| match action {
             crate::sys::tray::TrayAction::Restore => {
                 if let Ok(exe) = std::env::current_exe() {
-                    let _ = std::process::Command::new(exe).spawn();
+                    let _ = std::process::Command::new(exe)
+                        .arg("--start-watchdog")
+                        .spawn();
                 }
+                alive_cb.store(false, Ordering::SeqCst);
             }
             crate::sys::tray::TrayAction::Exit => {
                 alive_cb.store(false, Ordering::SeqCst);
@@ -137,7 +140,10 @@ fn run_watchdog_headless() -> i32 {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(cmd) = args.first().map(String::as_str) {
-        let code = match cmd {
+        if cmd == "--start-watchdog" {
+            // Fall through into GUI with Watchdog auto-started
+        } else {
+            let code = match cmd {
             "--help" | "-h" => {
                 print_help();
                 0
@@ -193,6 +199,7 @@ fn main() {
             }
         };
         std::process::exit(code);
+        }
     }
 
     unsafe {

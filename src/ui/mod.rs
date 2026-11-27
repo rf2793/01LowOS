@@ -222,6 +222,16 @@ impl LowOsApp {
         app.trigger_check_apps(&cc.egui_ctx);
         app.trigger_check_watchdog_task(&cc.egui_ctx);
         app.trigger_refresh_cfg(&cc.egui_ctx);
+        let auto_start = std::env::args().any(|a| a == "--start-watchdog")
+            || app
+                .watchdog
+                .snapshot
+                .lock()
+                .map(|g| g.config.auto_start_in_gui)
+                .unwrap_or(false);
+        if auto_start {
+            app.watchdog.start();
+        }
         {
             let snap = std::sync::Arc::clone(&app.watchdog.snapshot);
             let ctx_wd = cc.egui_ctx.clone();
@@ -780,6 +790,52 @@ impl eframe::App for LowOsApp {
                         );
                         if let Err(e) = crate::links::open_url(&url) {
                             self.banner = Some((false, e));
+                        }
+                    }
+                    ui.add_space(4.0);
+                    let autostart_btn = if self.watchdog_task_installed {
+                        egui::Button::new("Autostart Windows: ATIVO")
+                            .fill(Color32::from_rgb(6, 78, 59))
+                            .min_size(egui::vec2(190.0, 28.0))
+                    } else {
+                        egui::Button::new("Iniciar com o Windows")
+                            .fill(Color32::from_rgb(14, 116, 144))
+                            .min_size(egui::vec2(190.0, 28.0))
+                    };
+                    if ui
+                        .add_enabled(self.elevated, autostart_btn)
+                        .on_hover_text(
+                            "Inicia o Vigia de Afinidade + ISLC Standby Auto-Purge na bandeja 5s após o logon (sem UAC).",
+                        )
+                        .on_disabled_hover_text(
+                            "Execute como Administrador para configurar a inicialização com o Windows.",
+                        )
+                        .clicked()
+                    {
+                        if self.watchdog_task_installed {
+                            match crate::watchdog::remove_autostart_task() {
+                                Ok(m) => {
+                                    self.watchdog_task_installed = false;
+                                    self.banner = Some((true, m.clone()));
+                                    self.push_session_log(m);
+                                }
+                                Err(e) => {
+                                    self.banner = Some((false, e.clone()));
+                                    self.push_session_log(e);
+                                }
+                            }
+                        } else {
+                            match crate::watchdog::enable_autostart_with_runtime(&mut self.watchdog) {
+                                Ok(m) => {
+                                    self.watchdog_task_installed = true;
+                                    self.banner = Some((true, m.clone()));
+                                    self.push_session_log(m);
+                                }
+                                Err(e) => {
+                                    self.banner = Some((false, e.clone()));
+                                    self.push_session_log(e);
+                                }
+                            }
                         }
                     }
                     ui.add_space(4.0);

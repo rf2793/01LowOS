@@ -15,7 +15,7 @@ Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL
 2. **Vigia de Afinidade de Jogos (Nativo em Rust)**:
    - Detecta automaticamente a topologia da CPU (núcleos físicos, threads lógicas e SMT) via Win32 (`GetLogicalProcessorInformationEx`).
    - Mantém jogos e launchers fora do núcleo físico 0 (`0xFE` com SMT OFF / `0xFFFC` com SMT ON) e isola o fundo no núcleo 0 após confirmar uso 3D da GPU (`>= 5%` via PDH Win32), restaurando tudo ao fechar o jogo.
-   - Suporta **Minimizar para Bandeja** (ícone próprio na área de notificação) e tarefa automática no logon (`--watchdog`).
+   - Suporta **Minimizar para Bandeja** (ícone próprio na área de notificação) e botão 1-clique **"Iniciar com o Windows"** (tarefa agendada com `RunLevel Highest` sem UAC, iniciando Vigia + ISLC automaticamente 5s após o logon).
 3. **Gerenciador de Aplicativos**:
    - Catálogo embutido (`assets\Aplicativos_01LowOS.json`), detecção automática e verificação por assinatura Authenticode ou SHA-256 antes da instalação silenciosa.
 4. **Orquestrador de Build de ISO**:

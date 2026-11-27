@@ -149,6 +149,8 @@ pub struct WatchdogConfig {
     pub auto_purge_standby: bool,
     #[serde(default = "default_purge_threshold_mb")]
     pub purge_free_threshold_mb: u64,
+    #[serde(default)]
+    pub auto_start_in_gui: bool,
 }
 
 impl Default for WatchdogConfig {
@@ -158,6 +160,7 @@ impl Default for WatchdogConfig {
             ignored_processes: Vec::new(),
             auto_purge_standby: false,
             purge_free_threshold_mb: default_purge_threshold_mb(),
+            auto_start_in_gui: false,
         }
     }
 }
@@ -862,14 +865,32 @@ pub fn install_autostart_task() -> Result<String, String> {
         r#"
 $act = New-ScheduledTaskAction -Execute '{exe_esc}' -Argument '--watchdog'
 $trg = New-ScheduledTaskTrigger -AtLogOn
-$trg.Delay = 'PT20S'
+$trg.Delay = 'PT5S'
 $prn = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Highest
 $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Days 0)
 Register-ScheduledTask -TaskName '{TASK_NAME}' -TaskPath '{TASK_PATH}' -Action $act -Trigger $trg -Principal $prn -Settings $set -Force | Out-Null
 "#
     );
     run_powershell_checked(&script)?;
-    Ok(format!("Tarefa {TASK_PATH}{TASK_NAME} registrada no logon."))
+    Ok(format!("Tarefa {TASK_PATH}{TASK_NAME} registrada no logon (5s, Admin sem UAC)."))
+}
+
+pub fn enable_autostart_with_runtime(engine: &mut WatchdogEngine) -> Result<String, String> {
+    let mut cfg = engine
+        .snapshot
+        .lock()
+        .map(|g| g.config.clone())
+        .unwrap_or_default();
+    cfg.auto_start_in_gui = true;
+    cfg.auto_purge_standby = true;
+    engine.update_config(cfg)?;
+    let msg = install_autostart_task()?;
+    if !engine.is_running() {
+        engine.start();
+    }
+    Ok(format!(
+        "{msg} Vigia + ISLC Standby Auto-Purge ativados agora e em todos os boots."
+    ))
 }
 
 pub fn remove_autostart_task() -> Result<String, String> {

@@ -1,12 +1,12 @@
 use eframe::egui::{self, Color32, RichText, Stroke};
 
 use crate::ui::{badge, AppMsg, LowOsApp};
-use crate::watchdog::{install_autostart_task, remove_autostart_task};
+use crate::watchdog::{enable_autostart_with_runtime, remove_autostart_task};
 
 pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.heading("Vigia de Afinidade de Jogos (Nativo em Rust)");
     ui.label(
-        RichText::new("Substitui o WMI/PowerShell por polling Win32 leve (<0,1% CPU): mantém jogos fora do núcleo 0 (onde ficam IRQs da GPU) e isola o fundo no núcleo 0 com restauração automática ao fechar o jogo.")
+        RichText::new("As 82 otimizações do sistema são permanentes e não precisam do app aberto. Apenas o Vigia de Afinidade + ISLC rodam na bandeja; ative 'Iniciar com o Windows' para iniciar tudo automaticamente no logon (sem UAC).")
             .small()
             .color(Color32::from_rgb(148, 163, 184)),
     );
@@ -70,28 +70,34 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                         app.watchdog.start();
                     }
 
-                    if app.elevated {
-                        if app.watchdog_task_installed {
-                            if ui.button("Remover Tarefa de Logon").clicked() {
-                                match remove_autostart_task() {
-                                    Ok(m) => {
-                                        app.watchdog_task_installed = false;
-                                        let _ = app.tx.send(AppMsg::Banner { ok: true, text: m });
-                                    }
-                                    Err(e) => {
-                                        let _ = app.tx.send(AppMsg::Banner { ok: false, text: e });
-                                    }
-                                }
-                            }
-                        } else if ui.button("Instalar Tarefa no Logon (--watchdog)").clicked() {
-                            match install_autostart_task() {
+                    if app.watchdog_task_installed {
+                        if ui
+                            .add_enabled(app.elevated, egui::Button::new("Remover Tarefa de Logon"))
+                            .on_disabled_hover_text("Execute como Administrador para alterar a tarefa de logon.")
+                            .clicked()
+                        {
+                            match remove_autostart_task() {
                                 Ok(m) => {
-                                    app.watchdog_task_installed = true;
+                                    app.watchdog_task_installed = false;
                                     let _ = app.tx.send(AppMsg::Banner { ok: true, text: m });
                                 }
                                 Err(e) => {
                                     let _ = app.tx.send(AppMsg::Banner { ok: false, text: e });
                                 }
+                            }
+                        }
+                    } else if ui
+                        .add_enabled(app.elevated, egui::Button::new("Iniciar com o Windows (Bandeja)"))
+                        .on_disabled_hover_text("Execute como Administrador para configurar a inicialização com o Windows.")
+                        .clicked()
+                    {
+                        match enable_autostart_with_runtime(&mut app.watchdog) {
+                            Ok(m) => {
+                                app.watchdog_task_installed = true;
+                                let _ = app.tx.send(AppMsg::Banner { ok: true, text: m });
+                            }
+                            Err(e) => {
+                                let _ = app.tx.send(AppMsg::Banner { ok: false, text: e });
                             }
                         }
                     }
@@ -224,6 +230,15 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
             ui.add_space(6.0);
             ui.separator();
             ui.horizontal(|ui| {
+                if ui
+                    .checkbox(
+                        &mut cfg.auto_start_in_gui,
+                        "Iniciar Vigia automaticamente ao abrir o app",
+                    )
+                    .changed()
+                {
+                    cfg_changed = true;
+                }
                 if ui
                     .checkbox(
                         &mut cfg.auto_purge_standby,
