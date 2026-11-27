@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 use crate::sys::cmd::run_powershell_checked;
 use folders::discover_game_folders;
 use win32::{
-    detect_cpu_topology, get_process_affinity_and_priority, has_visible_window_for_pids,
-    list_processes, set_process_affinity_and_priority, CpuTopology, Gpu3dMonitor, ProcInfo,
-    ProcPriority,
+    boost_current_process_temporarily, detect_cpu_topology, get_process_affinity_and_priority,
+    has_visible_window_for_pids, list_processes, list_processes_fast,
+    set_process_affinity_and_priority, CpuTopology, Gpu3dMonitor, ProcInfo, ProcPriority,
 };
 
 pub const TASK_NAME: &str = "01LowOS_Vigia_Rust";
@@ -58,6 +58,11 @@ pub const IDLE_BG: &[&str] = &[
     "brave",
     "opera",
     "firefox",
+    "RZTHXHelper",
+    "AMDRSSrcExt",
+    "ArmouryCrate.UserSessionHelper",
+    "EpicWebHelper",
+    "GalaxyCommunication",
 ];
 
 pub const BELOW_NORMAL_BG: &[&str] = &["EALocalHostSvc", "Discord", "Spotify"];
@@ -792,7 +797,7 @@ fn run_watchdog_loop(stop: Arc<AtomicBool>, snap: Arc<Mutex<WatchdogSnapshot>>) 
     }
 
     let restored = restore_all_background(&mut saved, &topo);
-    for p in list_processes() {
+    for p in list_processes_fast() {
         if matches_ci(HEIRS, &p.name_stem) {
             let _ = set_process_affinity_and_priority(p.pid, Some(topo.all_mask), None);
         }
@@ -812,6 +817,7 @@ fn run_watchdog_loop(stop: Arc<AtomicBool>, snap: Arc<Mutex<WatchdogSnapshot>>) 
 }
 
 fn restore_all_background(saved: &mut HashMap<u32, SavedProcState>, topo: &CpuTopology) -> usize {
+    boost_current_process_temporarily(true);
     let mut restored = 0usize;
     for (pid, state) in saved.drain() {
         if let Some((cur_aff, cur_pri)) = get_process_affinity_and_priority(pid) {
@@ -832,7 +838,7 @@ fn restore_all_background(saved: &mut HashMap<u32, SavedProcState>, topo: &CpuTo
         }
     }
     let self_pid = std::process::id();
-    for p in list_processes() {
+    for p in list_processes_fast() {
         if p.pid <= 4 || p.pid == self_pid || matches_ci(NEVER_TOUCH, &p.name_stem) {
             continue;
         }
@@ -847,6 +853,7 @@ fn restore_all_background(saved: &mut HashMap<u32, SavedProcState>, topo: &CpuTo
             }
         }
     }
+    boost_current_process_temporarily(false);
     restored
 }
 

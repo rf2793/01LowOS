@@ -31,7 +31,7 @@ fn sz(v: &str) -> RegValue {
 }
 
 pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
-    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(100);
+    let mut list: Vec<Box<dyn Tweak>> = Vec::with_capacity(108);
 
     // 1. GPU & LATÊNCIA
     list.push(Box::new(RegistryTweak::with_defaults(
@@ -390,6 +390,42 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
+            id: "sys.storage_trim_on",
+            name: "SSD/NVMe: Garantir TRIM ativo em NTFS e ReFS (DisableDeleteNotify=0)",
+            category: Category::SystemKernel,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Garante DisableDeleteNotify=0 e RefsDisableDeleteNotify=0, mantendo o TRIM ativo no SSD/NVMe para evitar degradação de escrita e micro-travamentos em I/O.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "DisableDeleteNotify", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "RefsDisableDeleteNotify", dw(0)),
+        ],
+        vec![
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "DisableDeleteNotify", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "RefsDisableDeleteNotify", dw(0)),
+        ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "sys.wpbt_off",
+            name: "BIOS/Firmware: Bloquear execução OEM via WPBT (DisableWpbtExecution=1)",
+            category: Category::SystemKernel,
+            risk: RiskLevel::Low,
+            requires_reboot: true,
+            requires_admin: true,
+            description: "Define Session Manager\\DisableWpbtExecution=1 para impedir que a tabela ACPI WPBT da placa-mãe (ex.: ASUS Armoury Crate/DriverHub, Gigabyte, MSI) injete e execute instaladores OEM a cada boot.",
+            details: vec![],
+        },
+        vec![RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager", "DisableWpbtExecution", dw(1))],
+        vec![RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager", "DisableWpbtExecution")],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
             id: "sys.prefetcher_off",
             name: "NVMe/SSD: Desativar Prefetcher e Superfetch (EnablePrefetcher=0)",
             category: Category::SystemKernel,
@@ -708,6 +744,33 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
+            id: "user.explorer_gallery_quickaccess_clean",
+            name: "Explorer: Ocultar Galeria, abrir em Este Computador e limpar Recentes/Frequentes",
+            category: Category::UserHkcu,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: false,
+            description: "Oculta a visualização Galeria do Explorer, abre janelas direto em 'Este Computador' (LaunchTo=1) e desativa pastas frequentes e histórico de documentos recentes.",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hkcu, r"Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}", "System.IsPinnedToNameSpaceTree", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "LaunchTo", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer", "ShowFrequent", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer", "ShowRecent", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoRecentDocsHistory", dw(1)),
+        ],
+        vec![
+            RegOp::set(RegHive::Hkcu, r"Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}", "System.IsPinnedToNameSpaceTree", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "LaunchTo", dw(2)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer", "ShowFrequent", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer", "ShowRecent", dw(1)),
+            RegOp::delete(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoRecentDocsHistory"),
+        ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
             id: "user.desktop_drag_watermark",
             name: "Estética: Arrastar só contorno (DragFullWindows=0) e versão na área de trabalho",
             category: Category::UserHkcu,
@@ -1020,6 +1083,33 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDriveTypeAutoRun"),
             RegOp::delete(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDriveTypeAutoRun"),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\AutoplayHandlers", "DisableAutoplay", dw(0)),
+        ],
+    )));
+
+    list.push(Box::new(RegistryTweak::with_defaults(
+        TweakMeta {
+            id: "bloat.cli_notepad_ai_telemetry_off",
+            name: "Políticas: Desativar IA no Bloco de Notas, FindMyDevice e telemetria CLI (.NET/PS)",
+            category: Category::PrivacyBloat,
+            risk: RiskLevel::Low,
+            requires_reboot: false,
+            requires_admin: true,
+            description: "Desativa recursos de IA no Bloco de Notas (Win11 24H2+), banners de conta no CloudContent, FindMyDevice passivo e telemetria oficial de CLI (.NET e PowerShell).",
+            details: vec![],
+        },
+        vec![
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\WindowsNotepad", "DisableAIFeatures", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\CloudContent", "DisableConsumerAccountStateContent", dw(1)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\FindMyDevice", "AllowFindMyDevice", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", "DOTNET_CLI_TELEMETRY_OPTOUT", sz("1")),
+            RegOp::set(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", "POWERSHELL_TELEMETRY_OPTOUT", sz("1")),
+        ],
+        vec![
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\WindowsNotepad", "DisableAIFeatures"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\CloudContent", "DisableConsumerAccountStateContent"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\FindMyDevice", "AllowFindMyDevice"),
+            RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", "DOTNET_CLI_TELEMETRY_OPTOUT"),
+            RegOp::delete(RegHive::Hklm, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", "POWERSHELL_TELEMETRY_OPTOUT"),
         ],
     )));
 
@@ -1575,6 +1665,8 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "sys.win32_priority_separation",
     "sys.ntfs_low_overhead",
     "sys.ntfs_memory_usage",
+    "sys.storage_trim_on",
+    "sys.wpbt_off",
     "sys.prefetcher_off",
     "sys.defender_game_exclusions",
     "sys.defender_scan_throttle",
@@ -1598,6 +1690,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "user.keyboard_accessibility",
     "user.visual_perf",
     "user.explorer_clean",
+    "user.explorer_gallery_quickaccess_clean",
     "user.audio_no_ducking",
     "user.privacy_hkcu",
     "bloat.ai_search_cloud",
@@ -1605,6 +1698,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "bloat.edge_background_off",
     "bloat.browsers_bg_telemetry_off",
     "bloat.autorun_off",
+    "bloat.cli_notepad_ai_telemetry_off",
     "bloat.maintenance_background_off",
     "bloat.actioncenter_sso",
     "tasks.windows_bloat",
@@ -1629,7 +1723,7 @@ mod tests {
     #[test]
     fn catalog_ids_are_unique_and_non_empty() {
         let cat = build_catalog();
-        assert!(cat.len() >= 98);
+        assert!(cat.len() >= 102);
         validate_catalog(&cat).unwrap();
     }
 
@@ -1685,9 +1779,15 @@ mod tests {
                 assert!(!low.contains("mousedataqueuesize"), "Tweak instavel proibido em {}", meta.id);
                 assert!(!low.contains("keyboarddataqueuesize"), "Tweak instavel proibido em {}", meta.id);
                 assert!(!low.contains("disableautodaylighttimeset"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("powermizerenable"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("perflevelsrc"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("powermizerlevel"), "Placebo proibido em {}", meta.id);
+                assert!(!low.contains("minimumstackcommitinbytes"), "Tweak perigoso proibido em {}", meta.id);
+                assert!(!low.contains("splitlargecaches"), "Placebo proibido em {}", meta.id);
                 if !low.starts_with("remover ") {
                     assert!(!low.contains("iopagelocklimit"), "Placebo proibido em {}", meta.id);
                     assert!(!low.contains("globaltimerresolutionrequests"), "Timer global proibido em {}", meta.id);
+                    assert!(!low.contains("serializetimerexpiration"), "Placebo proibido em {}", meta.id);
                 }
                 assert!(!low.contains("wpnservice: disabled"), "WpnService deve ficar mantido! {}", meta.id);
                 assert!(!low.contains("wpnuserservice: disabled"), "WpnUserService deve ficar mantido! {}", meta.id);

@@ -6,9 +6,12 @@ use crate::watchdog::{enable_autostart_with_runtime, remove_autostart_task};
 pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.heading("Vigia de Afinidade de Jogos (Nativo em Rust)");
     ui.label(
-        RichText::new("As 82 otimizações do sistema são permanentes e não precisam do app aberto. Apenas o Vigia de Afinidade + ISLC rodam na bandeja; ative 'Iniciar com o Windows' para iniciar tudo automaticamente no logon (sem UAC).")
-            .small()
-            .color(Color32::from_rgb(148, 163, 184)),
+        RichText::new(format!(
+            "As {} otimizações do sistema são permanentes e não precisam do app aberto. Apenas o Vigia de Afinidade + ISLC rodam na bandeja; ative 'Iniciar com o Windows' para iniciar tudo automaticamente no logon (sem UAC).",
+            app.catalog.len()
+        ))
+        .small()
+        .color(Color32::from_rgb(148, 163, 184)),
     );
     ui.add_space(8.0);
 

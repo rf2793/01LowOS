@@ -323,6 +323,111 @@ pub fn read_gaming_health() -> Vec<HealthItem> {
     ]
 }
 
+const APPCOMPAT_LAYERS_KEY: &str =
+    r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";
+const FSO_DISABLE_FLAG: &str = "DISABLEDXMAXIMIZEDWINDOWEDMODE";
+
+pub fn validate_full_exe_path(input: &str) -> Result<String, String> {
+    let clean = input.trim().trim_matches('"').trim().to_string();
+    let bytes = clean.as_bytes();
+    if bytes.len() < 7
+        || !bytes[0].is_ascii_alphabetic()
+        || bytes[1] != b':'
+        || (bytes[2] != b'\\' && bytes[2] != b'/')
+    {
+        return Err("Informe o caminho completo do .exe (ex.: C:\\Jogos\\Game\\game.exe).".into());
+    }
+    if !clean.to_ascii_lowercase().ends_with(".exe") {
+        return Err("O arquivo precisa terminar com .exe.".into());
+    }
+    if !Path::new(&clean).is_file() {
+        return Err(format!("Executável não encontrado em '{clean}'."));
+    }
+    Ok(clean)
+}
+
+fn add_fso_flag(existing: Option<&str>) -> String {
+    let mut tokens: Vec<&str> = existing
+        .unwrap_or("")
+        .split_whitespace()
+        .filter(|t| *t != "~" && !t.eq_ignore_ascii_case(FSO_DISABLE_FLAG))
+        .collect();
+    tokens.push(FSO_DISABLE_FLAG);
+    format!("~ {}", tokens.join(" "))
+}
+
+fn remove_fso_flag(existing: &str) -> Option<String> {
+    let tokens: Vec<&str> = existing
+        .split_whitespace()
+        .filter(|t| *t != "~" && !t.eq_ignore_ascii_case(FSO_DISABLE_FLAG))
+        .collect();
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(format!("~ {}", tokens.join(" ")))
+    }
+}
+
+pub fn list_fso_disabled_exes() -> Vec<String> {
+    use crate::sys::registry::{list_value_names, read_value, RegHive, RegValue};
+    let mut list = Vec::new();
+    for name in list_value_names(RegHive::Hkcu, APPCOMPAT_LAYERS_KEY) {
+        if let Ok(Some(RegValue::String(val))) =
+            read_value(RegHive::Hkcu, APPCOMPAT_LAYERS_KEY, &name)
+        {
+            if val
+                .split_whitespace()
+                .any(|t| t.eq_ignore_ascii_case(FSO_DISABLE_FLAG))
+            {
+                list.push(name);
+            }
+        }
+    }
+    list.sort();
+    list
+}
+
+pub fn disable_fso_for_exe(input: &str) -> Result<String, String> {
+    use crate::sys::registry::{read_value, write_value, RegHive, RegValue};
+    let exe_path = validate_full_exe_path(input)?;
+    let existing = match read_value(RegHive::Hkcu, APPCOMPAT_LAYERS_KEY, &exe_path)? {
+        Some(RegValue::String(s)) => Some(s),
+        _ => None,
+    };
+    let new_val = add_fso_flag(existing.as_deref());
+    write_value(
+        RegHive::Hkcu,
+        APPCOMPAT_LAYERS_KEY,
+        &exe_path,
+        &RegValue::String(new_val),
+    )?;
+    Ok(format!(
+        "Fullscreen Optimizations desativado para '{exe_path}'."
+    ))
+}
+
+pub fn restore_fso_for_exe(exe_path: &str) -> Result<String, String> {
+    use crate::sys::registry::{delete_value, read_value, write_value, RegHive, RegValue};
+    let clean = exe_path.trim().trim_matches('"').trim();
+    if let Ok(Some(RegValue::String(cur))) =
+        read_value(RegHive::Hkcu, APPCOMPAT_LAYERS_KEY, clean)
+    {
+        if let Some(updated) = remove_fso_flag(&cur) {
+            write_value(
+                RegHive::Hkcu,
+                APPCOMPAT_LAYERS_KEY,
+                clean,
+                &RegValue::String(updated),
+            )?;
+        } else {
+            delete_value(RegHive::Hkcu, APPCOMPAT_LAYERS_KEY, clean)?;
+        }
+    } else {
+        delete_value(RegHive::Hkcu, APPCOMPAT_LAYERS_KEY, clean)?;
+    }
+    Ok(format!("FSO restaurado ao padrão para '{clean}'."))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,5 +451,21 @@ mod tests {
         );
         assert!(normalize_exe_name("   ").is_err());
         assert!(normalize_exe_name("bad;cmd").is_err());
+    }
+
+    #[test]
+    fn fso_layer_helpers_preserve_and_clean_flags() {
+        assert!(validate_full_exe_path("cs2.exe").is_err());
+        assert!(validate_full_exe_path(r"C:\__nonexistent_01lowos__\game.exe").is_err());
+        assert_eq!(add_fso_flag(None), "~ DISABLEDXMAXIMIZEDWINDOWEDMODE");
+        assert_eq!(
+            add_fso_flag(Some("~ HIGHDPIAWARE")),
+            "~ HIGHDPIAWARE DISABLEDXMAXIMIZEDWINDOWEDMODE"
+        );
+        assert_eq!(remove_fso_flag("~ DISABLEDXMAXIMIZEDWINDOWEDMODE"), None);
+        assert_eq!(
+            remove_fso_flag("~ HIGHDPIAWARE DISABLEDXMAXIMIZEDWINDOWEDMODE").as_deref(),
+            Some("~ HIGHDPIAWARE")
+        );
     }
 }

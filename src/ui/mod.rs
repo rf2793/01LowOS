@@ -137,6 +137,8 @@ pub struct LowOsApp {
 
     pub cfg_exe_input: String,
     pub cfg_disabled_list: Vec<String>,
+    pub fso_exe_input: String,
+    pub fso_disabled_list: Vec<String>,
     pub shader_dirs: Vec<crate::tools::ShaderCacheDir>,
     pub temp_dirs: Vec<crate::tools::ShaderCacheDir>,
     pub tools_busy: bool,
@@ -219,6 +221,8 @@ impl LowOsApp {
             show_donate_modal: false,
             cfg_exe_input: String::new(),
             cfg_disabled_list: Vec::new(),
+            fso_exe_input: String::new(),
+            fso_disabled_list: crate::tools::list_fso_disabled_exes(),
             shader_dirs: Vec::new(),
             temp_dirs: Vec::new(),
             tools_busy: false,

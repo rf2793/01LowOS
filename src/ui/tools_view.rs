@@ -385,5 +385,77 @@ pub fn render(app: &mut LowOsApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                         }
                     }
                 });
+
+            ui.add_space(8.0);
+
+            // 5. Per-game Fullscreen Optimizations (FSO) Manager
+            egui::Frame::NONE
+                .fill(Color32::from_rgb(23, 30, 41))
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(38, 49, 66)))
+                .corner_radius(8.0)
+                .inner_margin(12.0)
+                .show(ui, |ui| {
+                    ui.label(RichText::new("5. Fullscreen Optimizations (FSO) por Jogo — Exclusive Fullscreen").strong());
+                    ui.label(
+                        RichText::new("Aplica DISABLEDXMAXIMIZEDWINDOWEDMODE via HKCU\\AppCompatFlags\\Layers sem alterar arquivos do jogo (100% seguro com anti-cheats, não requer Admin).")
+                            .small()
+                            .color(Color32::from_rgb(148, 163, 184)),
+                    );
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut app.fso_exe_input)
+                                .desired_width(360.0)
+                                .hint_text(r"Ex.: C:\Program Files (x86)\Steam\steamapps\common\...\cs2.exe"),
+                        );
+                        if ui
+                            .button("Desativar FSO no .exe")
+                            .on_hover_text("Adiciona DISABLEDXMAXIMIZEDWINDOWEDMODE para o executável informado")
+                            .clicked()
+                        {
+                            match crate::tools::disable_fso_for_exe(&app.fso_exe_input) {
+                                Ok(msg) => {
+                                    app.fso_exe_input.clear();
+                                    app.fso_disabled_list = crate::tools::list_fso_disabled_exes();
+                                    app.banner = Some((true, msg.clone()));
+                                    app.push_session_log(msg);
+                                }
+                                Err(err) => {
+                                    app.banner = Some((false, err));
+                                }
+                            }
+                        }
+                        if ui.button("Atualizar lista").clicked() {
+                            app.fso_disabled_list = crate::tools::list_fso_disabled_exes();
+                        }
+                    });
+                    ui.add_space(6.0);
+                    if app.fso_disabled_list.is_empty() {
+                        ui.label(
+                            RichText::new("Nenhum jogo com FSO desativado em AppCompatFlags\\Layers.")
+                                .small()
+                                .color(Color32::from_rgb(148, 163, 184)),
+                        );
+                    } else {
+                        let list = app.fso_disabled_list.clone();
+                        for exe in &list {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(exe).monospace().small());
+                                if ui.small_button("Restaurar").clicked() {
+                                    match crate::tools::restore_fso_for_exe(exe) {
+                                        Ok(msg) => {
+                                            app.fso_disabled_list = crate::tools::list_fso_disabled_exes();
+                                            app.banner = Some((true, msg.clone()));
+                                            app.push_session_log(msg);
+                                        }
+                                        Err(err) => {
+                                            app.banner = Some((false, err));
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                });
         });
 }

@@ -1,6 +1,6 @@
 # 01LowOS — Otimizador Modular para Windows 11 em Rust
 
-Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL-3.0), para gerenciar, aplicar, verificar e reverter **individualmente** **98 otimizações** de latência, GPU, rede, energia, privacidade e serviços no Windows 11 (`24H2` / `25H2` / `26H1`), com snapshot e backup atômico por ajuste.
+Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL-3.0), para gerenciar, aplicar, verificar e reverter **individualmente** **102 otimizações** de latência, GPU, rede, energia, privacidade e serviços no Windows 11 (`24H2` / `25H2` / `26H1`), com snapshot e backup atômico por ajuste.
 
 - **Download do executável (Releases):** https://github.com/rf2793/01LowOS/releases
 - **Reportar problemas:** https://github.com/rf2793/01LowOS/issues
@@ -8,8 +8,8 @@ Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL
 
 ## Destaques
 
-1. **Melhorias Individuais (98 ajustes granulares)**:
-   - Organizadas por categoria (`GPU & Latência`, `Sistema & Kernel`, `Energia`, `Rede`, `Usuário (HKCU)`, `Privacidade & Bloat`, `Serviços Windows`, `Terceiros`, `Tarefas Agendadas`, `ETW Autologgers`), incluindo Plano de Energia 01LowOS (CPU Rocket + NVMe Primário/Secundário + AHCI/Wi-Fi) + Modo de Energia Win11 `Best Performance`, política P-core híbrida Intel, suspensão D3 de Áudio HD off, `MMAgent` PreLaunch off, throttle de CPU do Defender (20%), NetBIOS off, `MaxNegativeCacheTtl=0`, `GameInputSvc` (opt-in DPC), políticas GPO AppCompat/CEIP e Chrome/Brave/Edge, AutoRun/AutoPlay off e esquema de som `.None`.
+1. **Melhorias Individuais (102 ajustes granulares)**:
+   - Organizadas por categoria (`GPU & Latência`, `Sistema & Kernel`, `Energia`, `Rede`, `Usuário (HKCU)`, `Privacidade & Bloat`, `Serviços Windows`, `Terceiros`, `Tarefas Agendadas`, `ETW Autologgers`), incluindo Plano de Energia 01LowOS (CPU Rocket + NVMe Primário/Secundário + AHCI/Wi-Fi) + Modo de Energia Win11 `Best Performance`, política P-core híbrida Intel, suspensão D3 de Áudio HD off, `MMAgent` PreLaunch off, bloqueio OEM WPBT (`DisableWpbtExecution=1`), garantia de TRIM ativo, throttle de CPU do Defender (20%), NetBIOS off, `MaxNegativeCacheTtl=0`, `GameInputSvc` (opt-in DPC), políticas GPO AppCompat/CEIP, Chrome/Brave/Edge e Bloco de Notas/CLI, limpeza de Galeria/Acesso Rápido do Explorer, AutoRun/AutoPlay off e esquema de som `.None`.
    - Cada melhoria grava snapshot do estado original em `C:\ProgramData\01LowOS\Backups\tweaks\<id>.json` (ou `%LOCALAPPDATA%\01LowOS\Backups\tweaks\` sem elevação) antes de alterar o sistema.
    - Barra de progresso ao vivo, **Preset Jogos Seguro (1-clique)**, **Selecionar todas**, presets salváveis, tooltips explicativos, botão **Detalhes** e reversão unitária/total (**Reverter** / **Padrão Win**).
 2. **Vigia de Afinidade de Jogos (Nativo em Rust)**:
@@ -21,7 +21,7 @@ Aplicativo desktop nativo em Rust (`egui`/`eframe`), gratuito e open-source (GPL
 4. **Orquestrador de Build de ISO**:
    - Inspeciona pré-requisitos locais e acompanha fases de build de ISO customizada apenas sob ação explícita.
 5. **Ferramentas Extras & Backups**:
-   - Diagnóstico rápido de saúde gamer (HAGS, VBS, Modo de Jogo, OneDrive, ExitLag, Conta MS), limpador nativo de **Standby List** (estilo ISLC), gerenciador de **CFG por jogo DX12** (com trava anti-Vanguard `VAN9002`), limpador de **Cache de Shaders** e **Temporários / Cache Windows Update**, log persistente (`01LowOS.log`), reversão unitária/total, **Exportar Relatório (.txt)** e auto-teste (`--self-test` / `Executar_AutoTeste_Admin.cmd`).
+   - Diagnóstico rápido de saúde gamer (HAGS, VBS, Modo de Jogo, OneDrive, ExitLag, Conta MS), limpador nativo de **Standby List** (estilo ISLC), gerenciador de **CFG por jogo DX12** (com trava anti-Vanguard `VAN9002`) e **FSO por jogo** (`DISABLEDXMAXIMIZEDWINDOWEDMODE` em `HKCU\AppCompatFlags\Layers`), limpador de **Cache de Shaders** e **Temporários / Cache Windows Update**, log persistente (`01LowOS.log`), reversão unitária/total, **Exportar Relatório (.txt)** e auto-teste (`--self-test` / `Executar_AutoTeste_Admin.cmd`).
 
 ## Uso via Linha de Comando (CLI)
 

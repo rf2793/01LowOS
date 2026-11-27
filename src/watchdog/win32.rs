@@ -18,11 +18,11 @@ use windows_sys::Win32::System::SystemInformation::{
     SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
 };
 use windows_sys::Win32::System::Threading::{
-    GetPriorityClass, GetProcessAffinityMask, OpenProcess, QueryFullProcessImageNameW,
-    SetPriorityClass, SetProcessAffinityMask, ABOVE_NORMAL_PRIORITY_CLASS,
-    BELOW_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS, IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
-    PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION,
-    REALTIME_PRIORITY_CLASS,
+    GetCurrentProcess, GetPriorityClass, GetProcessAffinityMask, OpenProcess,
+    QueryFullProcessImageNameW, SetPriorityClass, SetProcessAffinityMask,
+    ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS,
+    IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS, PROCESS_QUERY_INFORMATION,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION, REALTIME_PRIORITY_CLASS,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
@@ -214,6 +214,14 @@ fn utf16_cstr_to_string(slice: &[u16]) -> String {
 }
 
 pub fn list_processes() -> Vec<ProcInfo> {
+    list_processes_inner(true)
+}
+
+pub fn list_processes_fast() -> Vec<ProcInfo> {
+    list_processes_inner(false)
+}
+
+fn list_processes_inner(with_paths: bool) -> Vec<ProcInfo> {
     let mut procs = Vec::new();
     unsafe {
         let snap: HANDLE = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -238,7 +246,11 @@ pub fn list_processes() -> Vec<ProcInfo> {
                     let _ = ProcessIdToSessionId(pid, &mut session_id);
                 }
 
-                let exe_path = if pid > 4 { query_exe_path(pid) } else { None };
+                let exe_path = if with_paths && pid > 4 {
+                    query_exe_path(pid)
+                } else {
+                    None
+                };
 
                 procs.push(ProcInfo {
                     pid,
@@ -256,6 +268,17 @@ pub fn list_processes() -> Vec<ProcInfo> {
         CloseHandle(snap);
     }
     procs
+}
+
+pub fn boost_current_process_temporarily(above_normal: bool) {
+    unsafe {
+        let pri = if above_normal {
+            ABOVE_NORMAL_PRIORITY_CLASS
+        } else {
+            NORMAL_PRIORITY_CLASS
+        };
+        let _ = SetPriorityClass(GetCurrentProcess(), pri);
+    }
 }
 
 fn query_exe_path(pid: u32) -> Option<PathBuf> {
