@@ -219,8 +219,8 @@ impl LowOsApp {
             show_donate_modal: false,
             cfg_exe_input: String::new(),
             cfg_disabled_list: Vec::new(),
-            shader_dirs: crate::tools::scan_shader_caches(),
-            temp_dirs: crate::tools::scan_temp_caches(),
+            shader_dirs: Vec::new(),
+            temp_dirs: Vec::new(),
             tools_busy: false,
             confirm_clean_shaders: false,
             confirm_clean_temp: false,
@@ -233,6 +233,8 @@ impl LowOsApp {
         app.trigger_check_apps(&cc.egui_ctx);
         app.trigger_check_watchdog_task(&cc.egui_ctx);
         app.trigger_refresh_cfg(&cc.egui_ctx);
+        app.trigger_scan_shaders(&cc.egui_ctx);
+        app.trigger_scan_temp(&cc.egui_ctx);
         let auto_start = std::env::args().any(|a| a == "--start-watchdog")
             || app
                 .watchdog

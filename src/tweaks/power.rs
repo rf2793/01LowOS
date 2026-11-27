@@ -560,3 +560,136 @@ impl Tweak for HiberfilOffTweak {
         Ok("Hibernação reativada (powercfg /h on).".into())
     }
 }
+
+const SCHEDPOLICY_GUID: &str = "93b8b6dc-0698-4d1c-9ee4-0644e900c85d";
+const SHORTSCHEDPOLICY_GUID: &str = "bae08b81-2d5e-4688-ad6a-13243356654b";
+
+#[derive(Debug, Serialize, Deserialize)]
+struct HybridCpuBackup {
+    scheme: String,
+    sched_policy: Option<u32>,
+    short_sched_policy: Option<u32>,
+}
+
+pub struct HybridCpuPcoreTweak {
+    meta: TweakMeta,
+}
+
+impl HybridCpuPcoreTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "power.cpu_hybrid_pcore",
+                name: "CPU Híbrida Intel (P+E Cores): Preferir P-Cores no agendador (SCHEDPOLICY=2)",
+                category: Category::Power,
+                risk: RiskLevel::Medium,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Em CPUs híbridas (Intel 12ª–14ª/Core Ultra com P-cores e E-cores), define SCHEDPOLICY=2 e SHORTSCHEDPOLICY=2 (Preferir processadores com desempenho) no plano ativo, evitando que threads de jogos caiam em E-cores. Marca como N/A em CPUs homogêneas (AMD Ryzen).",
+                details: vec![
+                    format!("powercfg /setacvalueindex SCHEME_CURRENT SUB_CPU {SCHEDPOLICY_GUID} 2 (SCHEDPOLICY)"),
+                    format!("powercfg /setacvalueindex SCHEME_CURRENT SUB_CPU {SHORTSCHEDPOLICY_GUID} 2 (SHORTSCHEDPOLICY)"),
+                ],
+            },
+        }
+    }
+}
+
+impl Tweak for HybridCpuPcoreTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        if !crate::watchdog::win32::is_heterogeneous_cpu() {
+            return TweakStatus::NotApplicable(
+                "CPU homogênea (apenas para CPUs híbridas P+E cores)".into(),
+            );
+        }
+        let (guid, _) = match PowerPlanTweak::get_active_scheme_line() {
+            Ok(v) => v,
+            Err(e) => return TweakStatus::Error(e),
+        };
+        let a = PowerPlanTweak::read_ac_index(&guid, SUB_CPU, SCHEDPOLICY_GUID) == Some(2);
+        let b = PowerPlanTweak::read_ac_index(&guid, SUB_CPU, SHORTSCHEDPOLICY_GUID) == Some(2);
+        match (a, b) {
+            (true, true) => TweakStatus::Applied,
+            (false, false) => TweakStatus::NotApplied,
+            _ => TweakStatus::Partial("1/2 políticas P-core".into()),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        if !crate::watchdog::win32::is_heterogeneous_cpu() {
+            return Err("CPU homogênea: ajuste exclusivo para CPUs híbridas P+E cores.".into());
+        }
+        let (guid, _) = PowerPlanTweak::get_active_scheme_line()?;
+        let bk = HybridCpuBackup {
+            scheme: guid.clone(),
+            sched_policy: PowerPlanTweak::read_ac_index(&guid, SUB_CPU, SCHEDPOLICY_GUID),
+            short_sched_policy: PowerPlanTweak::read_ac_index(&guid, SUB_CPU, SHORTSCHEDPOLICY_GUID),
+        };
+        let json = serde_json::to_value(&bk).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        for setting in [SCHEDPOLICY_GUID, SHORTSCHEDPOLICY_GUID] {
+            if let Err(e) = run_hidden_checked(
+                "powercfg.exe",
+                &["/setacvalueindex", &guid, SUB_CPU, setting, "2"],
+                &[0],
+            ) {
+                if created {
+                    let _ = backups.remove(self.meta.id);
+                }
+                return Err(e);
+            }
+        }
+        if let Err(e) = run_hidden_checked("powercfg.exe", &["/setactive", &guid], &[0]) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
+        Ok("SCHEDPOLICY=2 e SHORTSCHEDPOLICY=2 aplicados para preferir P-Cores.".into())
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de política híbrida encontrado.".into());
+        };
+        let bk: HybridCpuBackup =
+            serde_json::from_value(rec.data).map_err(|e| format!("Backup inválido: {e}"))?;
+        let s1 = bk.sched_policy.unwrap_or(5).to_string();
+        let s2 = bk.short_sched_policy.unwrap_or(5).to_string();
+        run_hidden_checked(
+            "powercfg.exe",
+            &["/setacvalueindex", &bk.scheme, SUB_CPU, SCHEDPOLICY_GUID, &s1],
+            &[0],
+        )?;
+        run_hidden_checked(
+            "powercfg.exe",
+            &["/setacvalueindex", &bk.scheme, SUB_CPU, SHORTSCHEDPOLICY_GUID, &s2],
+            &[0],
+        )?;
+        run_hidden_checked("powercfg.exe", &["/setactive", &bk.scheme], &[0])?;
+        backups.remove(self.meta.id)?;
+        Ok("Política híbrida de CPU restaurada ao valor original.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        let (guid, _) = PowerPlanTweak::get_active_scheme_line()?;
+        for setting in [SCHEDPOLICY_GUID, SHORTSCHEDPOLICY_GUID] {
+            run_hidden_checked(
+                "powercfg.exe",
+                &["/setacvalueindex", &guid, SUB_CPU, setting, "5"],
+                &[0],
+            )?;
+        }
+        run_hidden_checked("powercfg.exe", &["/setactive", &guid], &[0])?;
+        Ok("Política híbrida restaurada para Automático (5).".into())
+    }
+}

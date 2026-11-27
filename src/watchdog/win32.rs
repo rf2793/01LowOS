@@ -116,6 +116,44 @@ pub fn detect_cpu_topology() -> CpuTopology {
     CpuTopology::from_counts(logical_count, physical_cores)
 }
 
+pub fn is_heterogeneous_cpu() -> bool {
+    unsafe {
+        let mut len: u32 = 0;
+        GetLogicalProcessorInformationEx(RelationProcessorCore, null_mut(), &mut len);
+        if len == 0 {
+            return false;
+        }
+        let mut buf = vec![0u8; len as usize];
+        let ok = GetLogicalProcessorInformationEx(
+            RelationProcessorCore,
+            buf.as_mut_ptr() as *mut SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+            &mut len,
+        );
+        if ok == 0 {
+            return false;
+        }
+        let mut offset = 0usize;
+        let mut min_class: Option<u8> = None;
+        let mut max_class: Option<u8> = None;
+        while offset + std::mem::size_of::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>()
+            <= len as usize
+        {
+            let ptr = buf.as_ptr().add(offset) as *const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
+            let info = &*ptr;
+            if info.Relationship == RelationProcessorCore {
+                let ec = info.Anonymous.Processor.EfficiencyClass;
+                min_class = Some(min_class.map_or(ec, |m| m.min(ec)));
+                max_class = Some(max_class.map_or(ec, |m| m.max(ec)));
+            }
+            if info.Size == 0 {
+                break;
+            }
+            offset += info.Size as usize;
+        }
+        matches!((min_class, max_class), (Some(lo), Some(hi)) if lo != hi)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcPriority {
     Idle,

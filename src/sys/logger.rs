@@ -2,12 +2,14 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 use chrono::Local;
 
 use super::elevation::is_elevated;
 
 const MAX_LOG_BYTES: u64 = 2 * 1024 * 1024;
+static LOG_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn programdata_log_path() -> PathBuf {
     let base = std::env::var_os("ProgramData")
@@ -52,6 +54,7 @@ fn write_line_to(path: &Path, formatted: &str) -> std::io::Result<()> {
 }
 
 pub fn append_log(line: &str) {
+    let _guard = LOG_LOCK.get_or_init(|| Mutex::new(())).lock().ok();
     let formatted = format!("{} {line}\r\n", Local::now().format("%Y-%m-%d %H:%M:%S"));
     let primary = log_file_path();
     if write_line_to(&primary, &formatted).is_err() {

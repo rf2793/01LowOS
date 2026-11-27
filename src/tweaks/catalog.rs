@@ -4,18 +4,20 @@ use crate::sys::registry::{RegHive, RegValue};
 use crate::tweaks::advanced::{
     ActionCenterSsoTweak, AmdShaderCacheTweak, AmdUlpsOffTweak, AudioEnhancementsTweak,
     BcdCleanTimersTweak, CloudflareDnsTweak, ConsumerAppxTweak, DefenderGameExclusionsTweak,
-    EdgeBackgroundTweak, EtwAutologgerTweak, FirewallOrphansTweak, GpuNicMsiModeTweak,
-    LegacyHardwareIrqTweak, MemoryCompressionTweak, MmAgentPrelaunchTweak, NicPowerMgmtTweak,
-    NvidiaDynamicPstateTweak, NvidiaHdcpOffTweak, NvidiaTelemetryTweak, NvmeStorageMsiTweak,
-    OptionalFeaturesTweak, PnpUnusedDevicesTweak, PresentMonFpsTweak, SmartScreenAclTweak,
-    SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak, UsbAudioMsiModeTweak, UsbD3SuspendTweak,
-    UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
+    DefenderScanThrottleTweak, EdgeBackgroundTweak, EtwAutologgerTweak, FirewallOrphansTweak,
+    GpuNicMsiModeTweak, HdAudioIdleOffTweak, LegacyHardwareIrqTweak, MemoryCompressionTweak,
+    MmAgentPrelaunchTweak, NicPowerMgmtTweak, NvidiaDynamicPstateTweak, NvidiaHdcpOffTweak,
+    NvidiaTelemetryTweak, NvmeStorageMsiTweak, OptionalFeaturesTweak, PnpUnusedDevicesTweak,
+    PresentMonFpsTweak, SmartScreenAclTweak, SystemAppxTweak, TcpNagleTweak, ThirdPartyBloatTweak,
+    UsbAudioMsiModeTweak, UsbD3SuspendTweak, UsbDevicePowerMgmtTweak, UsbHubPowerMgmtTweak,
 };
 use crate::tweaks::network::{
     NetBiosOffTweak, NetQosNicFlowTweak, NetRscUdpLatencyTweak, NetTcpBbr2Tweak, NicBindingsTweak,
     NicInterruptModerationOffTweak, NicRssTweak, NicWolEeeTweak, WinInetWpadTweak,
 };
-use crate::tweaks::power::{DeviceWakeTweak, HiberfilOffTweak, PowerPlanTweak};
+use crate::tweaks::power::{
+    DeviceWakeTweak, HiberfilOffTweak, HybridCpuPcoreTweak, PowerPlanTweak,
+};
 use crate::tweaks::registry_tweak::{RegOp, RegistryTweak};
 use crate::tweaks::service_tweak::{ServiceGroupTweak, ServiceTarget};
 use crate::tweaks::task_tweak::{ScheduledTaskGroupTweak, TaskPattern};
@@ -445,6 +447,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
 
     list.push(Box::new(SmartScreenAclTweak::new()));
     list.push(Box::new(DefenderGameExclusionsTweak::new()));
+    list.push(Box::new(DefenderScanThrottleTweak::new()));
 
     list.push(Box::new(RegistryTweak::with_defaults(
         TweakMeta {
@@ -512,6 +515,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
     list.push(Box::new(UsbDevicePowerMgmtTweak::new()));
     list.push(Box::new(UsbHubPowerMgmtTweak::new()));
     list.push(Box::new(UsbD3SuspendTweak::new()));
+    list.push(Box::new(HdAudioIdleOffTweak::new()));
+    list.push(Box::new(HybridCpuPcoreTweak::new()));
 
     // 4. REDE
     list.push(Box::new(NicRssTweak::new()));
@@ -684,6 +689,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Search", "SearchboxTaskbarMode", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Search", "BingSearchEnabled", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Search", "BackgroundAppGlobalToggle", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\SearchSettings", "IsDynamicSearchBoxEnabled", dw(0)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\SearchSettings", "IsDeviceSearchHistoryEnabled", dw(0)),
             RegOp::set(RegHive::Hkcu, r"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\Bags\AllFolders\Shell", "FolderType", sz("NotSpecified")),
         ],
         vec![
@@ -692,6 +699,8 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Hidden", dw(2)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_TrackDocs", dw(1)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_AccountNotifications", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\SearchSettings", "IsDynamicSearchBoxEnabled", dw(1)),
+            RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\SearchSettings", "IsDeviceSearchHistoryEnabled", dw(1)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "ShowTaskViewButton", dw(1)),
             RegOp::set(RegHive::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\TaskbarDeveloperSettings", "TaskbarEndTask", dw(0)),
         ],
@@ -872,6 +881,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "ConnectedSearchUseWeb", dw(0)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "DisableSearch", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer", "AllowOnlineTips", dw(0)),
+            RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Explorer", "NoUseStoreOpenWith", dw(1)),
             RegOp::set(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "DisableDiagnosticDataViewer", dw(1)),
         ],
         vec![
@@ -901,6 +911,7 @@ pub fn build_catalog() -> Vec<Box<dyn Tweak>> {
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "ConnectedSearchUseWeb"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Windows Search", "DisableSearch"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer", "AllowOnlineTips"),
+            RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\Explorer", "NoUseStoreOpenWith"),
             RegOp::delete(RegHive::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "DisableDiagnosticDataViewer"),
         ],
     )));
@@ -1566,6 +1577,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "sys.ntfs_memory_usage",
     "sys.prefetcher_off",
     "sys.defender_game_exclusions",
+    "sys.defender_scan_throttle",
     "sys.ifeo_touch_voice_off",
     "power.plan_01lowos",
     "power.overlay_best_perf",
@@ -1574,6 +1586,7 @@ pub const SAFE_GAMING_PRESET: &[&str] = &[
     "power.usb_device_pm_off",
     "power.usb_hub_pm_off",
     "power.usb_d3_suspend_off",
+    "power.hdaudio_idle_off",
     "net.wol_eee_off",
     "net.nic_power_mgmt_off",
     "net.llmnr_mdns_wpad_off",
@@ -1616,7 +1629,7 @@ mod tests {
     #[test]
     fn catalog_ids_are_unique_and_non_empty() {
         let cat = build_catalog();
-        assert!(cat.len() >= 95);
+        assert!(cat.len() >= 98);
         validate_catalog(&cat).unwrap();
     }
 
@@ -1671,6 +1684,7 @@ mod tests {
                 assert!(!low.contains("nonsackrttresiliency"), "Placebo proibido em {}", meta.id);
                 assert!(!low.contains("mousedataqueuesize"), "Tweak instavel proibido em {}", meta.id);
                 assert!(!low.contains("keyboarddataqueuesize"), "Tweak instavel proibido em {}", meta.id);
+                assert!(!low.contains("disableautodaylighttimeset"), "Placebo proibido em {}", meta.id);
                 if !low.starts_with("remover ") {
                     assert!(!low.contains("iopagelocklimit"), "Placebo proibido em {}", meta.id);
                     assert!(!low.contains("globaltimerresolutionrequests"), "Timer global proibido em {}", meta.id);

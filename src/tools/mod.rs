@@ -100,6 +100,9 @@ fn candidate_shader_dirs() -> Vec<(&'static str, PathBuf)> {
         dirs.push(("NVIDIA DXCache", la.join("NVIDIA").join("DXCache")));
         dirs.push(("NVIDIA GLCache", la.join("NVIDIA").join("GLCache")));
         dirs.push(("AMD DxCache", la.join("AMD").join("DxCache")));
+        dirs.push(("AMD GLCache", la.join("AMD").join("GLCache")));
+        dirs.push(("AMD VkCache", la.join("AMD").join("VkCache")));
+        dirs.push(("Intel ShaderCache", la.join("Intel").join("ShaderCache")));
         dirs.push(("DirectX D3DSCache", la.join("D3DSCache")));
     }
     let pd = std::env::var_os("ProgramData")

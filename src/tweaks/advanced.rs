@@ -4434,3 +4434,284 @@ impl Tweak for MmAgentPrelaunchTweak {
         Ok("ApplicationPreLaunch reativado (padrão do Windows).".into())
     }
 }
+
+const AUDIO_CLASS_KEY: &str =
+    r"SYSTEM\CurrentControlSet\Control\Class\{4d36e96c-e325-11ce-bfc1-08002be10318}";
+
+pub struct HdAudioIdleOffTweak {
+    meta: TweakMeta,
+}
+
+impl HdAudioIdleOffTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "power.hdaudio_idle_off",
+                name: "Áudio HD: Desativar suspensão D3 do codec (ConservationIdleTime/IdlePowerState)",
+                category: Category::Power,
+                risk: RiskLevel::Low,
+                requires_reboot: true,
+                requires_admin: true,
+                description: "Impede o driver PortCls.sys de colocar o codec de áudio (Realtek, NVIDIA/AMD HD Audio) em sono D3 após poucos segundos de silêncio, eliminando estalos/pops e picos de latência DPC ao retomar o som.",
+                details: vec![
+                    format!(r"Escaneia HKLM\{AUDIO_CLASS_KEY}\00xx\PowerSettings"),
+                    "ConservationIdleTime = [FF,FF,FF,FF], PerformanceIdleTime = [FF,FF,FF,FF], IdlePowerState = [00,00,00,00]".into(),
+                ],
+            },
+        }
+    }
+
+    fn scan_targets() -> Vec<String> {
+        let mut out = Vec::new();
+        for sub in list_subkeys(RegHive::Hklm, AUDIO_CLASS_KEY) {
+            if sub.len() != 4 || !sub.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let ps_key = format!(r"{AUDIO_CLASS_KEY}\{sub}\PowerSettings");
+            if key_exists(RegHive::Hklm, &ps_key) {
+                out.push(ps_key);
+            }
+        }
+        out
+    }
+
+    fn desired_values() -> [(&'static str, Vec<u8>); 3] {
+        [
+            ("ConservationIdleTime", vec![0xFF, 0xFF, 0xFF, 0xFF]),
+            ("PerformanceIdleTime", vec![0xFF, 0xFF, 0xFF, 0xFF]),
+            ("IdlePowerState", vec![0x00, 0x00, 0x00, 0x00]),
+        ]
+    }
+}
+
+impl Tweak for HdAudioIdleOffTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        let targets = Self::scan_targets();
+        if targets.is_empty() {
+            return TweakStatus::NotApplicable("Nenhum dispositivo de áudio com PowerSettings".into());
+        }
+        let desired = Self::desired_values();
+        let total = targets.len() * desired.len();
+        let mut ok = 0usize;
+        for sk in &targets {
+            for (name, bytes) in &desired {
+                if matches!(read_value(RegHive::Hklm, sk, name), Ok(Some(RegValue::Binary(b))) if b == *bytes) {
+                    ok += 1;
+                }
+            }
+        }
+        if ok == total {
+            TweakStatus::Applied
+        } else if ok == 0 {
+            TweakStatus::NotApplied
+        } else {
+            TweakStatus::Partial(format!("{ok}/{total} chaves"))
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let targets = Self::scan_targets();
+        if targets.is_empty() {
+            return Ok("Nenhum dispositivo de áudio com PowerSettings encontrado.".into());
+        }
+        let desired = Self::desired_values();
+        let mut snap = Vec::new();
+        for sk in &targets {
+            for (name, _) in &desired {
+                let cur = read_value(RegHive::Hklm, sk, name)?;
+                snap.push(RegSnapshotEntry {
+                    hive: RegHive::Hklm,
+                    subkey: sk.clone(),
+                    name: (*name).into(),
+                    existed: cur.is_some(),
+                    value: cur,
+                    use_backup_restore: false,
+                });
+            }
+        }
+        let json = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, json)?;
+
+        let mut modified = 0usize;
+        for sk in &targets {
+            for (name, bytes) in &desired {
+                if let Err(e) = write_value(RegHive::Hklm, sk, name, &RegValue::Binary(bytes.clone())) {
+                    if created && modified == 0 {
+                        let _ = backups.remove(self.meta.id);
+                    }
+                    return Err(e);
+                }
+                modified += 1;
+            }
+        }
+        Ok(format!(
+            "Suspensão D3 de áudio desativada em {} dispositivo(s).",
+            targets.len()
+        ))
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de PowerSettings de áudio encontrado.".into());
+        };
+        let snap: Vec<RegSnapshotEntry> =
+            serde_json::from_value(rec.data).map_err(|e| e.to_string())?;
+        for e in &snap {
+            if e.existed {
+                if let Some(v) = &e.value {
+                    write_value(e.hive, &e.subkey, &e.name, v)?;
+                }
+            } else {
+                delete_value(e.hive, &e.subkey, &e.name)?;
+            }
+        }
+        backups.remove(self.meta.id)?;
+        Ok(format!(
+            "PowerSettings de áudio restaurado em {} entrada(s).",
+            snap.len()
+        ))
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        let targets = Self::scan_targets();
+        for sk in &targets {
+            write_value(RegHive::Hklm, sk, "ConservationIdleTime", &RegValue::Binary(vec![0x0A, 0, 0, 0]))?;
+            write_value(RegHive::Hklm, sk, "PerformanceIdleTime", &RegValue::Binary(vec![0x0A, 0, 0, 0]))?;
+            write_value(RegHive::Hklm, sk, "IdlePowerState", &RegValue::Binary(vec![0x03, 0, 0, 0]))?;
+        }
+        Ok(format!(
+            "PowerSettings de áudio restaurado ao padrão (10s / D3) em {} dispositivo(s).",
+            targets.len()
+        ))
+    }
+}
+
+pub struct DefenderScanThrottleTweak {
+    meta: TweakMeta,
+}
+
+impl DefenderScanThrottleTweak {
+    pub fn new() -> Self {
+        Self {
+            meta: TweakMeta {
+                id: "sys.defender_scan_throttle",
+                name: "Windows Defender: Limitar CPU de varredura a 20% e desativar catch-up/amostras",
+                category: Category::SystemKernel,
+                risk: RiskLevel::Low,
+                requires_reboot: false,
+                requires_admin: true,
+                description: "Configura via Set-MpPreference ScanAvgCPULoadFactor=20 (padrão 50%), DisableCatchupFullScan=$true, DisableCatchupQuickScan=$true e SubmitSamplesConsent=2 (NeverSend), evitando picos de CPU/disco do Defender ao ligar o PC mantendo a proteção em tempo real 100% ativa.",
+                details: vec![
+                    "Set-MpPreference -ScanAvgCPULoadFactor 20".into(),
+                    "Set-MpPreference -DisableCatchupFullScan $true -DisableCatchupQuickScan $true -SubmitSamplesConsent NeverSend".into(),
+                ],
+            },
+        }
+    }
+}
+
+impl Tweak for DefenderScanThrottleTweak {
+    fn meta(&self) -> &TweakMeta {
+        &self.meta
+    }
+
+    fn check(&self) -> TweakStatus {
+        if !crate::sys::elevation::is_elevated() {
+            return TweakStatus::NotApplicable("Requer Admin para verificar".into());
+        }
+        let script = r#"
+$wd = Get-Service WinDefend -ErrorAction SilentlyContinue
+if (-not $wd -or $wd.Status -ne 'Running') { Write-Output 'NO_DEFENDER'; exit 0 }
+$p = Get-MpPreference -ErrorAction Stop
+$ok = 0
+if ($p.ScanAvgCPULoadFactor -le 20 -and $p.ScanAvgCPULoadFactor -gt 0) { $ok++ }
+if ($p.DisableCatchupFullScan) { $ok++ }
+if ($p.DisableCatchupQuickScan) { $ok++ }
+if ([int]$p.SubmitSamplesConsent -eq 2) { $ok++ }
+Write-Output "$ok/4"
+"#;
+        match run_powershell_checked(script) {
+            Ok(out) => {
+                let s = out.stdout.trim();
+                if s == "NO_DEFENDER" {
+                    TweakStatus::NotApplicable("Windows Defender não está ativo".into())
+                } else if let Some((a, b)) = s.split_once('/') {
+                    let ok: usize = a.parse().unwrap_or(0);
+                    let total: usize = b.parse().unwrap_or(4);
+                    if ok == total {
+                        TweakStatus::Applied
+                    } else if ok == 0 {
+                        TweakStatus::NotApplied
+                    } else {
+                        TweakStatus::Partial(format!("{ok}/{total} preferências"))
+                    }
+                } else {
+                    TweakStatus::Error(s.to_string())
+                }
+            }
+            Err(e) => TweakStatus::Error(e),
+        }
+    }
+
+    fn apply(&self, backups: &BackupStore) -> Result<String, String> {
+        let query = r#"
+$wd = Get-Service WinDefend -ErrorAction SilentlyContinue
+if (-not $wd -or $wd.Status -ne 'Running') { throw 'Windows Defender não está ativo neste sistema.' }
+$p = Get-MpPreference -ErrorAction Stop
+[pscustomobject]@{
+    cpu = [int]$p.ScanAvgCPULoadFactor
+    catchup_full = [bool]$p.DisableCatchupFullScan
+    catchup_quick = [bool]$p.DisableCatchupQuickScan
+    samples = [int]$p.SubmitSamplesConsent
+} | ConvertTo-Json -Compress
+"#;
+        let out = run_powershell_checked(query)?;
+        let val: serde_json::Value =
+            serde_json::from_str(out.stdout.trim()).map_err(|e| e.to_string())?;
+        let created = backups.save_if_absent(self.meta.id, val)?;
+
+        let apply_script = "Set-MpPreference -ScanAvgCPULoadFactor 20 -DisableCatchupFullScan $true -DisableCatchupQuickScan $true -SubmitSamplesConsent NeverSend -ErrorAction Stop";
+        if let Err(e) = run_powershell_checked(apply_script) {
+            if created {
+                let _ = backups.remove(self.meta.id);
+            }
+            return Err(e);
+        }
+        Ok("Preferências de varredura do Defender otimizadas (CPU <= 20%, catch-up/amostras off).".into())
+    }
+
+    fn revert(&self, backups: &BackupStore) -> Result<String, String> {
+        let Some(rec) = backups.load(self.meta.id)? else {
+            return Err("Nenhum backup de preferências do Defender encontrado.".into());
+        };
+        let cpu = rec.data["cpu"].as_i64().unwrap_or(50);
+        let cf = if rec.data["catchup_full"].as_bool().unwrap_or(false) { "$true" } else { "$false" };
+        let cq = if rec.data["catchup_quick"].as_bool().unwrap_or(false) { "$true" } else { "$false" };
+        let samples = rec.data["samples"].as_i64().unwrap_or(1);
+        let script = format!(
+            "Set-MpPreference -ScanAvgCPULoadFactor {cpu} -DisableCatchupFullScan {cf} -DisableCatchupQuickScan {cq} -SubmitSamplesConsent {samples} -ErrorAction Stop"
+        );
+        run_powershell_checked(&script)?;
+        backups.remove(self.meta.id)?;
+        Ok("Preferências de varredura do Defender restauradas.".into())
+    }
+
+    fn can_reset_default(&self) -> bool {
+        true
+    }
+
+    fn reset_to_default(&self) -> Result<String, String> {
+        run_powershell_checked(
+            "Set-MpPreference -ScanAvgCPULoadFactor 50 -DisableCatchupFullScan $false -DisableCatchupQuickScan $false -SubmitSamplesConsent 1 -ErrorAction Stop",
+        )?;
+        Ok("Preferências do Defender restauradas ao padrão Microsoft.".into())
+    }
+}
