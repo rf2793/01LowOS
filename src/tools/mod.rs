@@ -123,7 +123,13 @@ fn dir_stats(dir: &Path) -> (usize, u64) {
     };
     for entry in rd.flatten() {
         let p = entry.path();
-        if p.is_dir() {
+        // file_type() nao segue links: juncoes/symlinks ficam fora da contagem (evita loop e
+        // contar arquivos de outra pasta).
+        let Ok(ft) = entry.file_type() else { continue };
+        if ft.is_symlink() {
+            continue;
+        }
+        if ft.is_dir() {
             let (f, b) = dir_stats(&p);
             files += f;
             bytes += b;
@@ -160,7 +166,17 @@ fn clear_dir_files(dir: &Path) -> (usize, u64, usize) {
     };
     for entry in rd.flatten() {
         let p = entry.path();
-        if p.is_dir() {
+        // Nunca entrar em juncao/symlink: a limpeza roda elevada e um link dentro de %TEMP%
+        // apontando para outra pasta faria apagar arquivos fora do cache.
+        let Ok(ft) = entry.file_type() else {
+            skipped += 1;
+            continue;
+        };
+        if ft.is_symlink() {
+            skipped += 1;
+            continue;
+        }
+        if ft.is_dir() {
             let (d, f, s) = clear_dir_files(&p);
             deleted += d;
             freed += f;
@@ -477,6 +493,36 @@ mod tests {
         );
         assert!(normalize_exe_name("   ").is_err());
         assert!(normalize_exe_name("bad;cmd").is_err());
+    }
+
+    #[test]
+    fn cache_cleaner_never_follows_junctions() {
+        let base = std::env::temp_dir().join(format!("01lowos_junction_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let cache = base.join("cache");
+        let outside = base.join("fora_do_cache");
+        fs::create_dir_all(cache.join("sub")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(cache.join("sub").join("lixo.bin"), b"x").unwrap();
+        fs::write(outside.join("importante.txt"), b"manter").unwrap();
+
+        let link = cache.join("link");
+        let made = crate::sys::cmd::run_hidden(
+            "cmd.exe",
+            &["/c", "mklink", "/J", &link.to_string_lossy(), &outside.to_string_lossy()],
+        )
+        .map(|o| o.success())
+        .unwrap_or(false);
+        assert!(made, "mklink /J falhou");
+
+        let (deleted, _, skipped) = clear_dir_files(&cache);
+        assert_eq!(deleted, 1);
+        assert!(skipped >= 1);
+        assert!(outside.join("importante.txt").is_file(), "limpeza atravessou a juncao");
+        assert_eq!(dir_stats(&cache).0, 0);
+
+        let _ = fs::remove_dir(&link);
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

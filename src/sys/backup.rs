@@ -100,8 +100,15 @@ impl BackupStore {
         };
         let json = serde_json::to_string_pretty(&rec)
             .map_err(|e| format!("Falha ao serializar backup de {tweak_id}: {e}"))?;
-        fs::write(&path, json)
-            .map_err(|e| format!("Falha ao gravar backup {:?}: {e}", path))?;
+        // Grava em arquivo temporario e renomeia: uma queda de energia no meio da escrita
+        // nunca deixa um .json truncado (que tornaria a reversao impossivel).
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, json)
+            .map_err(|e| format!("Falha ao gravar backup {:?}: {e}", tmp))?;
+        fs::rename(&tmp, &path).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            format!("Falha ao finalizar backup {:?}: {e}", path)
+        })?;
         Ok(true)
     }
 

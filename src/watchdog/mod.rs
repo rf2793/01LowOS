@@ -433,6 +433,7 @@ fn collect_sibling_game_exes(
 pub struct WatchdogEngine {
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
+    instance_guard: Option<win32::InstanceGuard>,
     pub snapshot: Arc<Mutex<WatchdogSnapshot>>,
 }
 
@@ -441,8 +442,29 @@ impl WatchdogEngine {
         Self {
             stop_flag: Arc::new(AtomicBool::new(false)),
             handle: None,
+            instance_guard: None,
             snapshot: Arc::new(Mutex::new(WatchdogSnapshot::default())),
         }
+    }
+
+    /// Tenta virar o dono do vigia nesta sessao. Retorna false se outro vigia
+    /// (bandeja/tarefa de logon ou outra janela) continuar rodando.
+    fn acquire_instance(&mut self) -> bool {
+        // Passagem bandeja -> GUI (--start-watchdog): o vigia da bandeja leva ate ~400 ms
+        // para encerrar e soltar a trava, entao espera ate ~2 s. Fora disso, desiste na hora
+        // (ex.: janela aberta a mao com a tarefa de logon ja rodando).
+        let handoff = std::env::args().any(|a| a == "--start-watchdog");
+        let attempts = if handoff { 10 } else { 1 };
+        for i in 0..attempts {
+            if let Some(guard) = win32::try_acquire_watchdog_lock() {
+                self.instance_guard = Some(guard);
+                return true;
+            }
+            if i + 1 < attempts {
+                thread::sleep(Duration::from_millis(200));
+            }
+        }
+        false
     }
 
     pub fn is_running(&self) -> bool {
@@ -475,6 +497,13 @@ impl WatchdogEngine {
         if self.handle.is_some() {
             return;
         }
+        if !self.acquire_instance() {
+            push_log(
+                &self.snapshot,
+                "Outro vigia já está ativo nesta sessão (bandeja/tarefa de logon); este não foi iniciado.".into(),
+            );
+            return;
+        }
         self.stop_flag.store(false, Ordering::SeqCst);
         let stop = Arc::clone(&self.stop_flag);
         let snap = Arc::clone(&self.snapshot);
@@ -489,6 +518,8 @@ impl WatchdogEngine {
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }
+        // So libera depois que a restauracao do loop terminou.
+        self.instance_guard = None;
     }
 }
 
@@ -1075,6 +1106,14 @@ mod tests {
         assert_eq!(classify_process("chrome"), ProcRole::IdleBg);
         assert_eq!(classify_process("ExitLag"), ProcRole::NeverTouch);
         assert_eq!(classify_process("notepad"), ProcRole::CommonOther);
+    }
+
+    #[test]
+    fn watchdog_lock_allows_only_one_owner_and_releases_on_drop() {
+        let first = win32::try_acquire_watchdog_lock().expect("primeira trava");
+        assert!(win32::try_acquire_watchdog_lock().is_none());
+        drop(first);
+        assert!(win32::try_acquire_watchdog_lock().is_some());
     }
 
     #[test]

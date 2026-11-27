@@ -22,7 +22,9 @@ pub struct IsoBuildState {
 }
 
 pub fn find_project_dir() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
+    // A copia NTFS local vem primeiro: o build roda como SYSTEM, que nao enxerga o Google
+    // Drive (Rodar_Como_SYSTEM.ps1 recusa esse volume). As demais sao so fallback.
+    let mut candidates = vec![PathBuf::from(r"C:\01LowOS\Projeto_ISO_Definitiva")];
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join("Projeto_ISO_Definitiva"));
         if let Some(p) = cwd.parent() {
@@ -34,7 +36,6 @@ pub fn find_project_dir() -> Option<PathBuf> {
             candidates.push(ancestor.join("Projeto_ISO_Definitiva"));
         }
     }
-    candidates.push(PathBuf::from(r"C:\01LowOS\Projeto_ISO_Definitiva"));
 
     candidates
         .into_iter()

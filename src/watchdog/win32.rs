@@ -484,6 +484,36 @@ pub fn has_visible_window_for_pids(pids: &HashSet<u32>) -> bool {
     ctx.found
 }
 
+/// Mutex nomeado da sessao: so um vigia por logon (GUI ou bandeja/tarefa).
+/// Liberado no Drop (ou automaticamente pelo Windows se o processo morrer).
+pub struct InstanceGuard(windows_sys::Win32::Foundation::HANDLE);
+
+impl Drop for InstanceGuard {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+/// Some(guard) se esta instancia virou a dona do vigia; None se outra ja roda.
+pub fn try_acquire_watchdog_lock() -> Option<InstanceGuard> {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    let name = crate::sys::elevation::to_wide_null(r"Local\01LowOS_Vigia_Afinidade");
+    unsafe {
+        let h = CreateMutexW(null(), 0, name.as_ptr());
+        if h.is_null() {
+            return None;
+        }
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            windows_sys::Win32::Foundation::CloseHandle(h);
+            return None;
+        }
+        Some(InstanceGuard(h))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
